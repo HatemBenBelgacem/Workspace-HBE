@@ -82,6 +82,7 @@ pub fn ProcessesPage() -> impl IntoView {
 
 #[component]
 fn ProcessTable(list: Vec<Process>, delete: ServerAction<DeleteProcess>) -> impl IntoView {
+    let navigate = use_navigate();
     view! {
         <div class="overflow-x-auto">
             <table class="table">
@@ -99,8 +100,12 @@ fn ProcessTable(list: Vec<Process>, delete: ServerAction<DeleteProcess>) -> impl
                             // Zweistufiges Löschen, weil dabei alle Schritte des Prozesses verloren gehen.
                             let confirming = RwSignal::new(false);
                             let id = p.id;
+                            let open = {
+                                let navigate = navigate.clone();
+                                move |_| navigate(&format!("/prozesse/{id}"), Default::default())
+                            };
                             view! {
-                                <tr class="hover:bg-base-200">
+                                <tr class="hover:bg-base-200 cursor-pointer select-none" title="Doppelklick zum Öffnen" on:dblclick=open>
                                     <td class="font-medium">
                                         <A href=format!("/prozesse/{id}") attr:class="link link-hover">{p.name}</A>
                                     </td>

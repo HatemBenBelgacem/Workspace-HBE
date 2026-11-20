@@ -84,3 +84,6 @@ Weitere Dateien:
 - Bestehende Migrationen nie ändern, sondern eine neue Datei anlegen.
 - Styling mit Tailwind- und DaisyUI-Klassen direkt in den `view!`-Makros.
 - Routen auf Deutsch (`/prozesse`, `/entitaeten`).
+- **Jeder Datensatz öffnet sich per Doppelklick** (`on:dblclick` auf der Zeile): In Übersichtslisten
+  führt er zur Detailseite, in Detailtabellen (Spalten, Schritte) öffnet er den Bearbeiten-Modus.
+  Neue Tabellen müssen das ebenfalls unterstützen.
