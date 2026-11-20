@@ -1,5 +1,5 @@
 use leptos::prelude::*;
-use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
+use leptos_meta::{HashedStylesheet, MetaTags, Title, provide_meta_context};
 use leptos_router::{
     ParamSegment, StaticSegment,
     components::{Route, Router, Routes},
@@ -21,6 +21,9 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <meta charset="utf-8"/>
                 <meta name="viewport" content="width=device-width, initial-scale=1"/>
                 <AutoReload options=options.clone()/>
+                // Dateinamen mit Hash (hash-files in Cargo.toml), damit Browser nach einem
+                // Deployment nie altes CSS, JavaScript oder WebAssembly aus dem Cache verwenden.
+                <HashedStylesheet options=options.clone() id="leptos"/>
                 <HydrationScripts options/>
                 <MetaTags/>
             </head>
@@ -36,7 +39,6 @@ pub fn App() -> impl IntoView {
     provide_meta_context();
 
     view! {
-        <Stylesheet id="leptos" href="/pkg/workspace-hbe.css"/>
         <Title text="Workspace HBE"/>
 
         <Router>

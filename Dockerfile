@@ -54,6 +54,8 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY --from=builder /app/target/release/workspace-hbe /app/workspace-hbe
+# Liste der Datei-Hashes; Leptos sucht sie im Ordner des Programms.
+COPY --from=builder /app/target/release/hash.txt /app/hash.txt
 COPY --from=builder /app/target/site /app/site
 COPY --from=builder /app/Cargo.toml /app/Cargo.toml
 
@@ -62,6 +64,7 @@ ENV RUST_LOG=info \
     LEPTOS_OUTPUT_NAME=workspace-hbe \
     LEPTOS_SITE_ROOT=site \
     LEPTOS_SITE_PKG_DIR=pkg \
+    LEPTOS_HASH_FILES=true \
     LEPTOS_SITE_ADDR=0.0.0.0:8080 \
     LEPTOS_RELOAD_PORT=3011
 

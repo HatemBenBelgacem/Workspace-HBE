@@ -85,6 +85,10 @@ Weitere Dateien:
 - Bestehende Migrationen nie ändern, sondern eine neue Datei anlegen.
 - Styling mit Tailwind- und DaisyUI-Klassen direkt in den `view!`-Makros.
 - Routen auf Deutsch (`/prozesse`, `/entitaeten`).
+- **Dateinamen mit Hash** (`hash-files = true` in `Cargo.toml`): CSS, JavaScript und WebAssembly
+  bekommen bei jedem Build einen neuen Namen, damit Browser nach einem Deployment keine alten Dateien
+  aus dem Cache laden. Das Stylesheet deshalb nur über `<HashedStylesheet>` in `shell` einbinden, nie
+  mit festem Pfad. Im Docker-Image muss `hash.txt` neben dem Programm liegen.
 - **Jeder Datensatz öffnet sich per Doppelklick** (`on:dblclick` auf der Zeile): In Übersichtslisten
   führt er zur Detailseite, in Detailtabellen (Spalten, Schritte) öffnet er das Modalfenster zum Bearbeiten.
   Neue Tabellen müssen das ebenfalls unterstützen.
