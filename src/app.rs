@@ -1,0 +1,52 @@
+use leptos::prelude::*;
+use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
+use leptos_router::{
+    ParamSegment, StaticSegment,
+    components::{Route, Router, Routes},
+};
+
+use crate::components::layout::AppLayout;
+use crate::pages::{
+    entities::EntitiesPage, entity_detail::EntityDetailPage, home::HomePage,
+    process_detail::ProcessDetailPage, processes::ProcessesPage,
+};
+
+pub fn shell(options: LeptosOptions) -> impl IntoView {
+    view! {
+        <!DOCTYPE html>
+        <html lang="de" data-theme="light">
+            <head>
+                <meta charset="utf-8"/>
+                <meta name="viewport" content="width=device-width, initial-scale=1"/>
+                <AutoReload options=options.clone()/>
+                <HydrationScripts options/>
+                <MetaTags/>
+            </head>
+            <body>
+                <App/>
+            </body>
+        </html>
+    }
+}
+
+#[component]
+pub fn App() -> impl IntoView {
+    provide_meta_context();
+
+    view! {
+        <Stylesheet id="leptos" href="/pkg/workspace-hbe.css"/>
+        <Title text="Workspace HBE"/>
+
+        <Router>
+            <AppLayout>
+                <Routes fallback=|| view! { <p>"Seite nicht gefunden."</p> }>
+                    <Route path=StaticSegment("") view=HomePage/>
+                    <Route path=StaticSegment("prozesse") view=ProcessesPage/>
+                    <Route path=(StaticSegment("prozesse"), ParamSegment("id")) view=ProcessDetailPage/>
+                    <Route path=StaticSegment("entitaeten") view=EntitiesPage/>
+                    <Route path=(StaticSegment("entitaeten"), ParamSegment("id")) view=EntityDetailPage/>
+                </Routes>
+            </AppLayout>
+        </Router>
+    }
+}

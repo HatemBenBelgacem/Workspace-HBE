@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:17
+    container_name: workspace-hbe-db
+    environment:
+      POSTGRES_USER: hbe
+      POSTGRES_PASSWORD: hbe
+      POSTGRES_DB: workspace_hbe
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

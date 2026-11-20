@@ -1,0 +1,15 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "leptos",
+      "runtimeExecutable": "cargo",
+      "runtimeArgs": [
+        "leptos",
+        "watch"
+      ],
+      "port": 3010,
+      "autoPort": false
+    }
+  ]
+}
