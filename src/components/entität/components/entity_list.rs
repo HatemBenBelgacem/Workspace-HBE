@@ -119,6 +119,7 @@ pub fn EntitiesPage() -> impl IntoView {
 
 #[component]
 fn EntityTable(list: Vec<Entity>, delete: ServerAction<DeleteEntity>) -> impl IntoView {
+    let navigate = use_navigate();
     view! {
         <div class="overflow-x-auto">
             <table class="table">
@@ -136,8 +137,12 @@ fn EntityTable(list: Vec<Entity>, delete: ServerAction<DeleteEntity>) -> impl In
                             // Zweistufiges Löschen, weil dabei alle Spalten der Entität verloren gehen.
                             let confirming = RwSignal::new(false);
                             let id = entity.id;
+                            let open = {
+                                let navigate = navigate.clone();
+                                move |_| navigate(&format!("/entitaeten/{id}"), Default::default())
+                            };
                             view! {
-                                <tr class="hover:bg-base-200">
+                                <tr class="hover:bg-base-200 cursor-pointer select-none" title="Doppelklick zum Öffnen" on:dblclick=open>
                                     <td class="font-medium">
                                         <A href=format!("/entitaeten/{id}") attr:class="link link-hover">{entity.name}</A>
                                     </td>

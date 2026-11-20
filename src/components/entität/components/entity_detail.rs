@@ -338,7 +338,12 @@ fn ColumnRow(
     };
 
     view! {
-        <tr class="hover:bg-base-200">
+        <tr
+            class="hover:bg-base-200"
+            class:cursor-pointer=move || !editing.get()
+            title=move || (!editing.get()).then_some("Doppelklick zum Bearbeiten")
+            on:dblclick=move |_| editing.set(true)
+        >
             <td class="text-base-content/60">{number}</td>
             <Show when=move || editing.get() fallback=display>
                 <DraftCells draft entities=entities.clone() on_enter=save/>
