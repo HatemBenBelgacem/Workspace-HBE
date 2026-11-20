@@ -3,4 +3,5 @@
 pub mod entitaet;
 pub mod home;
 pub mod layout;
+pub mod modal;
 pub mod prozess;

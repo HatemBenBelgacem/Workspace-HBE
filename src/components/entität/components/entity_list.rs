@@ -2,6 +2,7 @@ use leptos::prelude::*;
 use leptos_router::{components::A, hooks::use_navigate};
 
 use super::er_diagram::ErDiagram;
+use crate::components::modal::FormModal;
 use crate::backend::entitaet::model::Entity;
 use crate::backend::entitaet::server_fns::{
     CreateEntity, DeleteEntity, list_all_entity_columns, list_entities,
@@ -31,6 +32,7 @@ pub fn EntitiesPage() -> impl IntoView {
     let active_tab = RwSignal::new(EntitiesTab::List);
 
     let name = RwSignal::new(String::new());
+    let modal_open = RwSignal::new(false);
 
     // Nach dem Anlegen direkt zur Erfassung der Spalten wechseln.
     let navigate = use_navigate();
@@ -40,34 +42,39 @@ pub fn EntitiesPage() -> impl IntoView {
         }
     });
 
-    let submit = move |ev: leptos::ev::SubmitEvent| {
-        ev.prevent_default();
+    let open_modal = move |_| {
+        name.set(String::new());
+        create.clear();
+        modal_open.set(true);
+    };
+    let submit = move || {
         create.dispatch(CreateEntity { name: name.get_untracked() });
     };
 
     view! {
         <div class="mx-auto max-w-6xl space-y-6">
-            <h1 class="text-2xl font-bold">"Entitäten"</h1>
+            <div class="flex items-center justify-between gap-4">
+                <h1 class="text-2xl font-bold">"Entitäten"</h1>
+                <button class="btn btn-primary" on:click=open_modal>"+ Neue Entität"</button>
+            </div>
 
-            <form class="card bg-base-100 shadow-sm" on:submit=submit>
-                <div class="card-body gap-4">
-                    <h2 class="card-title">"Neue Entität"</h2>
-                    <label class="floating-label">
-                        <span>"Bezeichnung"</span>
-                        <input class="input w-full" placeholder="Bezeichnung" required bind:value=name/>
-                    </label>
-                    {move || {
-                        create.value().get().and_then(Result::err).map(|e| {
-                            view! { <div class="alert alert-error">{e.to_string()}</div> }
-                        })
-                    }}
-                    <div class="card-actions justify-end">
-                        <button class="btn btn-primary" type="submit" disabled=move || create.pending().get()>
-                            "Anlegen und Spalten erfassen"
-                        </button>
-                    </div>
-                </div>
-            </form>
+            <FormModal
+                open=modal_open
+                title="Neue Entität".to_string()
+                on_submit=submit
+                submit_label="Anlegen und Spalten erfassen"
+                submit_disabled=Signal::derive(move || create.pending().get() || name.get().trim().is_empty())
+            >
+                <label class="floating-label">
+                    <span>"Bezeichnung"</span>
+                    <input class="input w-full" placeholder="Bezeichnung" required bind:value=name/>
+                </label>
+                {move || {
+                    create.value().get().and_then(Result::err).map(|e| {
+                        view! { <div class="alert alert-error">{e.to_string()}</div> }
+                    })
+                }}
+            </FormModal>
 
             <div class="card bg-base-100 shadow-sm">
                 <div role="tablist" class="tabs tabs-border px-4 pt-2">

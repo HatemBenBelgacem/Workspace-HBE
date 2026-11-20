@@ -6,6 +6,7 @@ use crate::backend::entitaet::server_fns::{
     AddEntityColumn, DeleteEntityColumn, RenameEntity, UpdateEntityColumn, get_entity,
     list_entities, list_entity_columns,
 };
+use crate::components::modal::FormModal;
 
 /// Häufige Datentypen als Vorschlag; eigene Typen sind ebenfalls erlaubt.
 const DATA_TYPES: &[&str] = &[
@@ -19,7 +20,7 @@ struct ColumnActions {
     delete: ServerAction<DeleteEntityColumn>,
 }
 
-/// Eingabefelder einer Spalten-Zeile, für neue und bearbeitete Spalten.
+/// Eingabefelder des Spalten-Modalfensters, für neue und bearbeitete Spalten.
 #[derive(Clone, Copy)]
 struct ColumnDraft {
     name: RwSignal<String>,
@@ -90,20 +91,44 @@ pub fn EntityDetailPage() -> impl IntoView {
         |(id, ..)| list_entity_columns(id),
     );
 
+    // Ein Modalfenster für neue und bearbeitete Spalten.
     let draft = ColumnDraft::new(None);
-    let add_column = move || {
+    let modal_open = RwSignal::new(false);
+    let editing_id = RwSignal::new(None::<i64>);
+    let open_column = Callback::new(move |column: Option<EntityColumn>| {
+        draft.reset(column.as_ref());
+        editing_id.set(column.map(|c| c.id));
+        modal_open.set(true);
+    });
+    let save_column = move || {
         if draft.name.get_untracked().trim().is_empty() {
             return;
         }
-        actions.add.dispatch(AddEntityColumn {
-            entity_id: entity_id(),
-            name: draft.name.get_untracked(),
-            data_type: draft.data_type.get_untracked(),
-            meaning: draft.meaning.get_untracked(),
-            references_entity_id: draft.reference_id(),
-        });
-        draft.reset(None);
+        match editing_id.get_untracked() {
+            Some(id) => {
+                actions.update.dispatch(UpdateEntityColumn {
+                    id,
+                    name: draft.name.get_untracked(),
+                    data_type: draft.data_type.get_untracked(),
+                    meaning: draft.meaning.get_untracked(),
+                    references_entity_id: draft.reference_id(),
+                });
+            }
+            None => {
+                actions.add.dispatch(AddEntityColumn {
+                    entity_id: entity_id(),
+                    name: draft.name.get_untracked(),
+                    data_type: draft.data_type.get_untracked(),
+                    meaning: draft.meaning.get_untracked(),
+                    references_entity_id: draft.reference_id(),
+                });
+            }
+        }
+        modal_open.set(false);
     };
+    let modal_title = Signal::derive(move || {
+        if editing_id.get().is_some() { "Spalte bearbeiten" } else { "Neue Spalte" }.to_string()
+    });
 
     let error = move || {
         [
@@ -150,50 +175,65 @@ pub fn EntityDetailPage() -> impl IntoView {
 
             <div class="card bg-base-100 shadow-sm">
                 <div class="card-body">
-                    <h2 class="card-title">"Spalten"</h2>
+                    <div class="flex items-center justify-between gap-4">
+                        <h2 class="card-title">"Spalten"</h2>
+                        <button class="btn btn-primary btn-sm" on:click=move |_| open_column.run(None)>
+                            "+ Spalte hinzufügen"
+                        </button>
+                    </div>
                     <Transition fallback=|| view! { <span class="loading loading-spinner"></span> }>
                         {move || Suspend::new(async move {
                             let columns = columns.await.unwrap_or_default();
                             let entities = entities.await.unwrap_or_default();
-                            view! { <ColumnTable columns entities actions draft on_add=add_column/> }
+                            view! { <ColumnTable columns entities actions on_edit=open_column/> }
                         })}
                     </Transition>
                 </div>
             </div>
+
+            <FormModal
+                open=modal_open
+                title=modal_title
+                on_submit=save_column
+                submit_disabled=Signal::derive(move || draft.name.get().trim().is_empty())
+            >
+                <ColumnFields draft entities/>
+            </FormModal>
         </div>
     }
 }
 
-/// Bezeichnung der Entität mit Umbenennen.
+/// Bezeichnung der Entität; Umbenennen im Modalfenster.
 #[component]
 fn EntityHeader(id: i64, name: String, rename: ServerAction<RenameEntity>) -> impl IntoView {
-    let editing = RwSignal::new(false);
+    let open = RwSignal::new(false);
     let value = RwSignal::new(name.clone());
+    let original = StoredValue::new(name.clone());
+    let open_modal = move |_| {
+        value.set(original.get_value());
+        open.set(true);
+    };
     let save = move || {
         rename.dispatch(RenameEntity { id, name: value.get_untracked() });
-        editing.set(false);
+        open.set(false);
     };
 
     view! {
-        <Show
-            when=move || editing.get()
-            fallback=move || view! {
-                <div class="flex items-center gap-2">
-                    <h1 class="text-2xl font-bold">{name.clone()}</h1>
-                    <button class="btn btn-ghost btn-sm" title="Umbenennen" on:click=move |_| editing.set(true)>"✎"</button>
-                </div>
-            }
+        <div class="flex items-center gap-2">
+            <h1 class="text-2xl font-bold">{name}</h1>
+            <button class="btn btn-ghost btn-sm" title="Umbenennen" on:click=open_modal>"✎"</button>
+        </div>
+        <FormModal
+            open
+            title="Entität umbenennen".to_string()
+            on_submit=save
+            submit_disabled=Signal::derive(move || value.get().trim().is_empty())
         >
-            <div class="flex items-center gap-2">
-                <input
-                    class="input"
-                    bind:value=value
-                    on:keydown=move |ev| if ev.key() == "Enter" { save() }
-                />
-                <button class="btn btn-primary btn-sm" on:click=move |_| save()>"Speichern"</button>
-                <button class="btn btn-ghost btn-sm" on:click=move |_| editing.set(false)>"Abbrechen"</button>
-            </div>
-        </Show>
+            <label class="floating-label">
+                <span>"Bezeichnung"</span>
+                <input class="input w-full" placeholder="Bezeichnung" required bind:value=value/>
+            </label>
+        </FormModal>
     }
 }
 
@@ -202,14 +242,19 @@ fn ColumnTable(
     columns: Vec<EntityColumn>,
     entities: Vec<Entity>,
     actions: ColumnActions,
-    draft: ColumnDraft,
-    on_add: impl Fn() + Copy + Send + Sync + 'static,
+    on_edit: Callback<Option<EntityColumn>>,
 ) -> impl IntoView {
+    if columns.is_empty() {
+        return view! { <p class="text-base-content/60">"Noch keine Spalten erfasst."</p> }.into_any();
+    }
     let rows = columns
         .into_iter()
         .enumerate()
         .map(|(index, column)| {
-            view! { <ColumnRow column number=index + 1 entities=entities.clone() actions/> }
+            let target = column
+                .references_entity_id
+                .and_then(|id| entities.iter().find(|e| e.id == id).cloned());
+            view! { <ColumnRow column number=index + 1 target actions on_edit/> }
         })
         .collect_view();
 
@@ -227,38 +272,58 @@ fn ColumnTable(
                     </tr>
                 </thead>
                 <tbody>{rows}</tbody>
-                <tfoot>
-                    <tr class="bg-base-200/50">
-                        <td>"+"</td>
-                        <DraftCells draft entities=entities.clone() on_enter=on_add/>
-                        <td class="text-right">
-                            <button
-                                class="btn btn-primary btn-sm"
-                                disabled=move || draft.name.get().trim().is_empty()
-                                on:click=move |_| on_add()
-                            >
-                                "Hinzufügen"
-                            </button>
-                        </td>
-                    </tr>
-                </tfoot>
             </table>
         </div>
     }
+    .into_any()
 }
 
-/// Die Eingabefelder einer Zeile; Enter speichert.
 #[component]
-fn DraftCells(
-    draft: ColumnDraft,
-    entities: Vec<Entity>,
-    on_enter: impl Fn() + Copy + Send + Sync + 'static,
+fn ColumnRow(
+    column: EntityColumn,
+    number: usize,
+    /// Entität, auf die die Spalte verweist.
+    target: Option<Entity>,
+    actions: ColumnActions,
+    on_edit: Callback<Option<EntityColumn>>,
 ) -> impl IntoView {
-    let on_keydown = move |ev: leptos::ev::KeyboardEvent| {
-        if ev.key() == "Enter" {
-            on_enter();
-        }
-    };
+    let id = column.id;
+    let stored = StoredValue::new(column.clone());
+    let edit = move || on_edit.run(Some(stored.get_value()));
+
+    view! {
+        <tr
+            class="hover:bg-base-200 cursor-pointer select-none"
+            title="Doppelklick zum Bearbeiten"
+            on:dblclick=move |_| edit()
+        >
+            <td class="text-base-content/60">{number}</td>
+            <td class="font-medium">{column.name}</td>
+            <td>
+                {(!column.data_type.is_empty())
+                    .then(|| view! { <span class="badge badge-soft badge-secondary">{column.data_type}</span> })}
+            </td>
+            <td class="text-base-content/80">{column.meaning}</td>
+            <td>
+                {target.map(|e| view! {
+                    <A href=format!("/entitaeten/{}", e.id) attr:class="link link-hover">{format!("→ {}", e.name)}</A>
+                })}
+            </td>
+            <td class="text-right whitespace-nowrap">
+                <button class="btn btn-ghost btn-xs" title="Bearbeiten" on:click=move |_| edit()>"✎"</button>
+                <button class="btn btn-ghost btn-xs text-error" title="Löschen"
+                    on:click=move |_| { actions.delete.dispatch(DeleteEntityColumn { id }); }>"✕"</button>
+            </td>
+        </tr>
+    }
+}
+
+/// Die Felder im Spalten-Modalfenster.
+#[component]
+fn ColumnFields(
+    draft: ColumnDraft,
+    entities: Resource<Result<Vec<Entity>, ServerFnError>>,
+) -> impl IntoView {
     // Wer einen Verweis wählt, meint in der Regel den Typ "Referenz".
     let on_reference = move |_| {
         if !draft.reference.get_untracked().is_empty() && draft.data_type.get_untracked().is_empty() {
@@ -267,91 +332,40 @@ fn DraftCells(
     };
 
     view! {
-        <td><input class="input input-sm w-full min-w-32" placeholder="Bezeichnung" bind:value=draft.name on:keydown=on_keydown/></td>
-        <td><input class="input input-sm w-full min-w-28" placeholder="Typ" list="column-types" bind:value=draft.data_type on:keydown=on_keydown/></td>
-        <td><input class="input input-sm w-full min-w-48" placeholder="Bedeutung" bind:value=draft.meaning on:keydown=on_keydown/></td>
-        <td>
-            <select class="select select-sm min-w-36" bind:value=draft.reference on:change=on_reference>
-                <option value="">"—"</option>
-                {entities
-                    .into_iter()
-                    .map(|e| view! { <option value=e.id.to_string()>{e.name}</option> })
-                    .collect_view()}
+        <label class="floating-label">
+            <span>"Bezeichnung"</span>
+            <input class="input w-full" placeholder="Bezeichnung" required bind:value=draft.name/>
+        </label>
+        <label class="floating-label">
+            <span>"Typ"</span>
+            <input class="input w-full" placeholder="Typ" list="column-types" bind:value=draft.data_type/>
+        </label>
+        <label class="floating-label">
+            <span>"Bedeutung"</span>
+            <textarea class="textarea w-full" placeholder="Bedeutung" bind:value=draft.meaning></textarea>
+        </label>
+        <label class="floating-label">
+            <span>"Verweist auf"</span>
+            <select class="select w-full" bind:value=draft.reference on:change=on_reference>
+                <option value="">"— kein Verweis —"</option>
+                <Transition>
+                    {move || Suspend::new(async move {
+                        entities
+                            .await
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|e| {
+                                let value = e.id.to_string();
+                                let selected = {
+                                    let value = value.clone();
+                                    move || draft.reference.get() == value
+                                };
+                                view! { <option value=value selected=selected>{e.name}</option> }
+                            })
+                            .collect_view()
+                    })}
+                </Transition>
             </select>
-        </td>
-    }
-}
-
-#[component]
-fn ColumnRow(
-    column: EntityColumn,
-    number: usize,
-    entities: Vec<Entity>,
-    actions: ColumnActions,
-) -> impl IntoView {
-    let editing = RwSignal::new(false);
-    let draft = ColumnDraft::new(Some(&column));
-    let target = column
-        .references_entity_id
-        .and_then(|id| entities.iter().find(|e| e.id == id).cloned());
-    let original = StoredValue::new(column.clone());
-    let id = column.id;
-
-    let save = move || {
-        if draft.name.get_untracked().trim().is_empty() {
-            return;
-        }
-        actions.update.dispatch(UpdateEntityColumn {
-            id,
-            name: draft.name.get_untracked(),
-            data_type: draft.data_type.get_untracked(),
-            meaning: draft.meaning.get_untracked(),
-            references_entity_id: draft.reference_id(),
-        });
-        editing.set(false);
-    };
-    let cancel = move || {
-        original.with_value(|c| draft.reset(Some(c)));
-        editing.set(false);
-    };
-
-    let display = move || {
-        let column = column.clone();
-        view! {
-            <td class="font-medium">{column.name}</td>
-            <td>
-                {(!column.data_type.is_empty())
-                    .then(|| view! { <span class="badge badge-soft badge-secondary">{column.data_type}</span> })}
-            </td>
-            <td class="text-base-content/80">{column.meaning}</td>
-            <td>
-                {target.clone().map(|e| view! {
-                    <A href=format!("/entitaeten/{}", e.id) attr:class="link link-hover">{format!("→ {}", e.name)}</A>
-                })}
-            </td>
-            <td class="text-right whitespace-nowrap">
-                <button class="btn btn-ghost btn-xs" title="Bearbeiten" on:click=move |_| editing.set(true)>"✎"</button>
-                <button class="btn btn-ghost btn-xs text-error" title="Löschen"
-                    on:click=move |_| { actions.delete.dispatch(DeleteEntityColumn { id }); }>"✕"</button>
-            </td>
-        }
-    };
-
-    view! {
-        <tr
-            class="hover:bg-base-200"
-            class:cursor-pointer=move || !editing.get()
-            title=move || (!editing.get()).then_some("Doppelklick zum Bearbeiten")
-            on:dblclick=move |_| editing.set(true)
-        >
-            <td class="text-base-content/60">{number}</td>
-            <Show when=move || editing.get() fallback=display>
-                <DraftCells draft entities=entities.clone() on_enter=save/>
-                <td class="text-right whitespace-nowrap">
-                    <button class="btn btn-primary btn-xs" on:click=move |_| save()>"Speichern"</button>
-                    <button class="btn btn-ghost btn-xs" on:click=move |_| cancel()>"Abbrechen"</button>
-                </td>
-            </Show>
-        </tr>
+        </label>
     }
 }
