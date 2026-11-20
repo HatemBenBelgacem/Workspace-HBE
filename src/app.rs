@@ -5,11 +5,13 @@ use leptos_router::{
     components::{Route, Router, Routes},
 };
 
-use crate::components::layout::AppLayout;
-use crate::pages::{
-    entities::EntitiesPage, entity_detail::EntityDetailPage, home::HomePage,
-    process_detail::ProcessDetailPage, processes::ProcessesPage,
+use crate::components::entitaet::components::{
+    entity_detail::EntityDetailPage, entity_list::EntitiesPage,
 };
+use crate::components::prozess::components::{
+    process_detail::ProcessDetailPage, process_list::ProcessesPage,
+};
+use crate::components::{home::HomePage, layout::AppLayout};
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {

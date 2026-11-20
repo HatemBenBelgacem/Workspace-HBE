@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 use leptos_router::hooks::use_navigate;
 
-use crate::model::{Entity, EntityColumn};
+use crate::backend::entitaet::model::{Entity, EntityColumn};
 
 const BOX_W: f64 = 240.0;
 const HEADER_H: f64 = 34.0;

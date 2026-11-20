@@ -1,10 +1,10 @@
 use leptos::prelude::*;
 use leptos_router::{components::A, hooks::use_params_map};
 
-use crate::components::process_model::ProcessModel;
-use crate::model::{
-    AddStep, DeleteStep, MoveStep, ProcessStep, StepFields, UpdateStep, child_steps, get_process,
-    list_steps,
+use super::process_model::ProcessModel;
+use crate::backend::prozess::model::{ProcessStep, StepFields, child_steps};
+use crate::backend::prozess::server_fns::{
+    AddStep, DeleteStep, MoveStep, UpdateStep, get_process, list_steps,
 };
 
 #[derive(Clone, Copy, PartialEq)]

@@ -1,9 +1,10 @@
 use leptos::prelude::*;
 use leptos_router::{components::A, hooks::use_params_map};
 
-use crate::model::{
-    AddEntityColumn, DeleteEntityColumn, Entity, EntityColumn, RenameEntity, UpdateEntityColumn,
-    get_entity, list_entities, list_entity_columns,
+use crate::backend::entitaet::model::{Entity, EntityColumn};
+use crate::backend::entitaet::server_fns::{
+    AddEntityColumn, DeleteEntityColumn, RenameEntity, UpdateEntityColumn, get_entity,
+    list_entities, list_entity_columns,
 };
 
 /// Häufige Datentypen als Vorschlag; eigene Typen sind ebenfalls erlaubt.

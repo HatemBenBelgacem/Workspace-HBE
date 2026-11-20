@@ -1,7 +1,8 @@
 use leptos::prelude::*;
 use leptos_router::{components::A, hooks::use_navigate};
 
-use crate::model::{CreateProcess, DeleteProcess, Process, list_processes};
+use crate::backend::prozess::model::Process;
+use crate::backend::prozess::server_fns::{CreateProcess, DeleteProcess, list_processes};
 
 #[component]
 pub fn ProcessesPage() -> impl IntoView {

@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 
-use crate::model::{ProcessStep, child_steps};
+use crate::backend::prozess::model::{ProcessStep, child_steps};
 
 const LANE_LABEL_W: f64 = 36.0;
 /// Mindesthöhe einer Bahn (ein einzelner Prozessstrom).

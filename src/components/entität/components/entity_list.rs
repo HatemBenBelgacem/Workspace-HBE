@@ -1,8 +1,11 @@
 use leptos::prelude::*;
 use leptos_router::{components::A, hooks::use_navigate};
 
-use crate::components::er_diagram::ErDiagram;
-use crate::model::{CreateEntity, DeleteEntity, Entity, list_all_entity_columns, list_entities};
+use super::er_diagram::ErDiagram;
+use crate::backend::entitaet::model::Entity;
+use crate::backend::entitaet::server_fns::{
+    CreateEntity, DeleteEntity, list_all_entity_columns, list_entities,
+};
 
 #[derive(Clone, Copy, PartialEq)]
 enum EntitiesTab {
