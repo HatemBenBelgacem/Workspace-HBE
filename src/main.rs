@@ -20,7 +20,12 @@ async fn main() {
         .expect("Migrationen fehlgeschlagen");
 
     let conf = get_configuration(None).unwrap();
-    let addr = conf.leptos_options.site_addr;
+    // Hosting-Plattformen wie Railway geben den Port über PORT vor und erwarten, dass auf
+    // allen Schnittstellen gelauscht wird.
+    let addr = match std::env::var("PORT").ok().and_then(|p| p.parse::<u16>().ok()) {
+        Some(port) => std::net::SocketAddr::from(([0, 0, 0, 0], port)),
+        None => conf.leptos_options.site_addr,
+    };
     let leptos_options = conf.leptos_options;
     let routes = generate_route_list(App);
 
