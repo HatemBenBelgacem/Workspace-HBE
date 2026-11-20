@@ -3,6 +3,7 @@ use leptos_router::{components::A, hooks::use_navigate};
 
 use crate::backend::prozess::model::Process;
 use crate::backend::prozess::server_fns::{CreateProcess, DeleteProcess, list_processes};
+use crate::components::modal::FormModal;
 
 #[component]
 pub fn ProcessesPage() -> impl IntoView {
@@ -12,6 +13,7 @@ pub fn ProcessesPage() -> impl IntoView {
 
     let name = RwSignal::new(String::new());
     let description = RwSignal::new(String::new());
+    let modal_open = RwSignal::new(false);
 
     // Nach dem Anlegen direkt zur Erfassung der Schritte wechseln.
     let navigate = use_navigate();
@@ -21,8 +23,13 @@ pub fn ProcessesPage() -> impl IntoView {
         }
     });
 
-    let submit = move |ev: leptos::ev::SubmitEvent| {
-        ev.prevent_default();
+    let open_modal = move |_| {
+        name.set(String::new());
+        description.set(String::new());
+        create.clear();
+        modal_open.set(true);
+    };
+    let submit = move || {
         create.dispatch(CreateProcess {
             name: name.get_untracked(),
             description: description.get_untracked(),
@@ -31,33 +38,32 @@ pub fn ProcessesPage() -> impl IntoView {
 
     view! {
         <div class="mx-auto max-w-5xl space-y-6">
-            <h1 class="text-2xl font-bold">"Geschäftsprozesse"</h1>
+            <div class="flex items-center justify-between gap-4">
+                <h1 class="text-2xl font-bold">"Geschäftsprozesse"</h1>
+                <button class="btn btn-primary" on:click=open_modal>"+ Neuer Prozess"</button>
+            </div>
 
-            <form class="card bg-base-100 shadow-sm" on:submit=submit>
-                <div class="card-body gap-4">
-                    <h2 class="card-title">"Neuer Prozess"</h2>
-                    <div class="grid gap-4 md:grid-cols-2">
-                        <label class="floating-label">
-                            <span>"Name"</span>
-                            <input class="input w-full" placeholder="Name" required bind:value=name/>
-                        </label>
-                        <label class="floating-label">
-                            <span>"Beschreibung"</span>
-                            <input class="input w-full" placeholder="Beschreibung" bind:value=description/>
-                        </label>
-                    </div>
-                    {move || {
-                        create.value().get().and_then(Result::err).map(|e| {
-                            view! { <div class="alert alert-error">{e.to_string()}</div> }
-                        })
-                    }}
-                    <div class="card-actions justify-end">
-                        <button class="btn btn-primary" type="submit" disabled=move || create.pending().get()>
-                            "Anlegen und Schritte erfassen"
-                        </button>
-                    </div>
-                </div>
-            </form>
+            <FormModal
+                open=modal_open
+                title="Neuer Prozess".to_string()
+                on_submit=submit
+                submit_label="Anlegen und Schritte erfassen"
+                submit_disabled=Signal::derive(move || create.pending().get() || name.get().trim().is_empty())
+            >
+                <label class="floating-label">
+                    <span>"Name"</span>
+                    <input class="input w-full" placeholder="Name" required bind:value=name/>
+                </label>
+                <label class="floating-label">
+                    <span>"Beschreibung"</span>
+                    <textarea class="textarea w-full" placeholder="Beschreibung" bind:value=description></textarea>
+                </label>
+                {move || {
+                    create.value().get().and_then(Result::err).map(|e| {
+                        view! { <div class="alert alert-error">{e.to_string()}</div> }
+                    })
+                }}
+            </FormModal>
 
             <div class="card bg-base-100 shadow-sm">
                 <div class="card-body">

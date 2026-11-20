@@ -70,6 +70,7 @@ Weitere Dateien:
 - `src/app.rs` – HTML-Gerüst (`shell`) und Routen
 - `src/backend/db.rs` – gemeinsame Hilfen für Server-Funktionen (`pool()`, `err()`, `required()`)
 - `src/components/layout.rs`, `home.rs` – Rahmen und Startseite
+- `src/components/modal.rs` – gemeinsames Modalfenster für alle Eingabemasken
 - `migrations/` – SQL-Migrationen, fortlaufend nummeriert (`0006_….sql`)
 
 ## Konventionen
@@ -85,5 +86,8 @@ Weitere Dateien:
 - Styling mit Tailwind- und DaisyUI-Klassen direkt in den `view!`-Makros.
 - Routen auf Deutsch (`/prozesse`, `/entitaeten`).
 - **Jeder Datensatz öffnet sich per Doppelklick** (`on:dblclick` auf der Zeile): In Übersichtslisten
-  führt er zur Detailseite, in Detailtabellen (Spalten, Schritte) öffnet er den Bearbeiten-Modus.
+  führt er zur Detailseite, in Detailtabellen (Spalten, Schritte) öffnet er das Modalfenster zum Bearbeiten.
   Neue Tabellen müssen das ebenfalls unterstützen.
+- **Eingabemasken immer im Modalfenster**, nie inline in Tabellen oder Seiten. Dafür gibt es die
+  gemeinsame Komponente `FormModal` in `src/components/modal.rs` (Enter speichert, Escape schliesst).
+  Pro Seite ein Modalfenster für Neu und Bearbeiten, gesteuert über Signale.

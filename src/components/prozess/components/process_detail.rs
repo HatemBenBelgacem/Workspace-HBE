@@ -6,6 +6,7 @@ use crate::backend::prozess::model::{ProcessStep, StepFields, child_steps};
 use crate::backend::prozess::server_fns::{
     AddStep, DeleteStep, MoveStep, UpdateStep, get_process, list_steps,
 };
+use crate::components::modal::FormModal;
 
 #[derive(Clone, Copy, PartialEq)]
 enum DetailTab {
@@ -31,7 +32,7 @@ struct StepActions {
     move_step: ServerAction<MoveStep>,
 }
 
-/// Eingabefelder einer Tabellenzeile, sowohl für neue als auch für bearbeitete Schritte.
+/// Eingabefelder des Schritt-Modalfensters, für neue und bearbeitete Schritte.
 #[derive(Clone, Copy)]
 struct StepDraft {
     activity: RwSignal<String>,
@@ -75,6 +76,52 @@ impl StepDraft {
     }
 }
 
+/// Wohin ein Schritt aus dem Modalfenster gespeichert wird.
+#[derive(Clone, PartialEq)]
+enum StepTarget {
+    /// Neuer Schritt im Hauptablauf (`parent_step_id` leer) oder im Ja-/Nein-Zweig einer Bedingung.
+    New { parent_step_id: Option<i64>, branch: Option<String> },
+    Edit(i64),
+}
+
+/// Das eine Modalfenster der Seite für neue und bearbeitete Schritte.
+#[derive(Clone, Copy)]
+struct StepForm {
+    draft: StepDraft,
+    open: RwSignal<bool>,
+    target: RwSignal<StepTarget>,
+}
+
+impl StepForm {
+    fn new() -> Self {
+        Self {
+            draft: StepDraft::new(StepFields::default()),
+            open: RwSignal::new(false),
+            target: RwSignal::new(StepTarget::New { parent_step_id: None, branch: None }),
+        }
+    }
+
+    fn new_step(&self, parent_step_id: Option<i64>, branch: Option<&str>) {
+        self.draft.set(StepFields::default());
+        self.target.set(StepTarget::New { parent_step_id, branch: branch.map(str::to_string) });
+        self.open.set(true);
+    }
+
+    fn edit(&self, step: &ProcessStep) {
+        self.draft.set(step.fields());
+        self.target.set(StepTarget::Edit(step.id));
+        self.open.set(true);
+    }
+
+    fn title(&self) -> String {
+        match self.target.get() {
+            StepTarget::Edit(_) => "Schritt bearbeiten".to_string(),
+            StepTarget::New { branch: Some(branch), .. } => format!("Neuer Schritt im Zweig „{branch}“"),
+            StepTarget::New { .. } => "Neuer Schritt".to_string(),
+        }
+    }
+}
+
 #[component]
 pub fn ProcessDetailPage() -> impl IntoView {
     let params = use_params_map();
@@ -109,18 +156,21 @@ pub fn ProcessDetailPage() -> impl IntoView {
 
     let active_tab = RwSignal::new(DetailTab::Description);
 
-    let draft = StepDraft::new(StepFields::default());
-    let add_step = move || {
-        if draft.activity.get_untracked().trim().is_empty() {
+    let form = StepForm::new();
+    let save_step = move || {
+        let fields = form.draft.fields();
+        if fields.activity.trim().is_empty() {
             return;
         }
-        actions.add.dispatch(AddStep {
-            process_id: process_id(),
-            parent_step_id: None,
-            branch: None,
-            fields: draft.fields(),
-        });
-        draft.set(StepFields::default());
+        match form.target.get_untracked() {
+            StepTarget::Edit(id) => {
+                actions.update.dispatch(UpdateStep { id, fields });
+            }
+            StepTarget::New { parent_step_id, branch } => {
+                actions.add.dispatch(AddStep { process_id: process_id(), parent_step_id, branch, fields });
+            }
+        }
+        form.open.set(false);
     };
 
     let error = move || {
@@ -196,8 +246,8 @@ pub fn ProcessDetailPage() -> impl IntoView {
                                     let main = child_steps(&steps, None, None);
                                     view! {
                                         <Suggestions steps=steps.clone()/>
-                                        <StepTable group=main.clone() prefix=String::new() actions draft on_add=add_step/>
-                                        {condition_sections(&steps, &main, "", actions)}
+                                        <StepTable group=main.clone() prefix=String::new() actions form/>
+                                        {condition_sections(&steps, &main, "", actions, form)}
                                     }
                                     .into_any()
                                 }
@@ -207,6 +257,15 @@ pub fn ProcessDetailPage() -> impl IntoView {
                     </Transition>
                 </div>
             </div>
+
+            <FormModal
+                open=form.open
+                title=Signal::derive(move || form.title())
+                on_submit=save_step
+                submit_disabled=Signal::derive(move || form.draft.activity.get().trim().is_empty())
+            >
+                <StepFormFields draft=form.draft/>
+            </FormModal>
         </div>
     }
 }
@@ -241,6 +300,7 @@ fn condition_sections(
     group: &[ProcessStep],
     prefix: &str,
     actions: StepActions,
+    form: StepForm,
 ) -> AnyView {
     group
         .iter()
@@ -256,6 +316,7 @@ fn condition_sections(
                     step=step.clone()
                     number=format!("{prefix}{}", i + 1)
                     actions
+                    form
                 />
             }
         })
@@ -269,6 +330,7 @@ fn ConditionSection(
     step: ProcessStep,
     number: String,
     actions: StepActions,
+    form: StepForm,
 ) -> impl IntoView {
     let question = if step.condition.trim().is_empty() {
         view! { <span class="text-warning">"Keine Frage erfasst – die Zweige bleiben gespeichert."</span> }
@@ -285,8 +347,8 @@ fn ConditionSection(
                 </div>
                 <div class="font-semibold">{question}</div>
             </div>
-            <BranchTable all=all.clone() parent=step.clone() branch="Ja" number=number.clone() actions/>
-            <BranchTable all parent=step branch="Nein" number actions/>
+            <BranchTable all=all.clone() parent=step.clone() branch="Ja" number=number.clone() actions form/>
+            <BranchTable all parent=step branch="Nein" number actions form/>
         </section>
     }
 }
@@ -298,6 +360,7 @@ fn BranchTable(
     branch: &'static str,
     number: String,
     actions: StepActions,
+    form: StepForm,
 ) -> impl IntoView {
     let group = child_steps(&all, Some(parent.id), Some(branch));
     let prefix = format!("{number}.{}", &branch[..1]);
@@ -305,21 +368,6 @@ fn BranchTable(
         ("badge-success", "border-success/40")
     } else {
         ("badge-error", "border-error/40")
-    };
-
-    let draft = StepDraft::new(StepFields::default());
-    let (process_id, parent_id) = (parent.process_id, parent.id);
-    let on_add = move || {
-        if draft.activity.get_untracked().trim().is_empty() {
-            return;
-        }
-        actions.add.dispatch(AddStep {
-            process_id,
-            parent_step_id: Some(parent_id),
-            branch: Some(branch.to_string()),
-            fields: draft.fields(),
-        });
-        draft.set(StepFields::default());
     };
 
     view! {
@@ -331,9 +379,16 @@ fn BranchTable(
                 </span>
             </div>
             <div class="p-2">
-                <StepTable group=group.clone() prefix=format!("{prefix}") actions draft on_add/>
+                <StepTable
+                    group=group.clone()
+                    prefix=prefix.clone()
+                    actions
+                    form
+                    parent_step_id=parent.id
+                    branch=branch
+                />
             </div>
-            <div class="px-4 pb-4">{condition_sections(&all, &group, &prefix, actions)}</div>
+            <div class="px-4 pb-4">{condition_sections(&all, &group, &prefix, actions, form)}</div>
         </div>
     }
 }
@@ -344,8 +399,11 @@ fn StepTable(
     /// Nummer des übergeordneten Schritts, z. B. "2.J" für den Ja-Zweig von Schritt 2.
     prefix: String,
     actions: StepActions,
-    draft: StepDraft,
-    on_add: impl Fn() + Copy + Send + Sync + 'static,
+    form: StepForm,
+    /// Schritt mit der Bedingung, zu dessen Zweig die Tabelle gehört; leer im Hauptablauf.
+    #[prop(optional)]
+    parent_step_id: Option<i64>,
+    #[prop(optional)] branch: Option<&'static str>,
 ) -> impl IntoView {
     let count = group.len();
     let rows = group
@@ -359,6 +417,7 @@ fn StepTable(
                     is_first=index == 0
                     is_last=index + 1 == count
                     actions
+                    form
                 />
             }
         })
@@ -380,58 +439,38 @@ fn StepTable(
                     </tr>
                 </thead>
                 <tbody>{rows}</tbody>
-                <tfoot>
-                    <tr class="bg-base-200/50">
-                        <td>"+"</td>
-                        <DraftCells draft on_enter=on_add/>
-                        <td class="text-right">
-                            <button
-                                class="btn btn-primary btn-sm"
-                                disabled=move || draft.activity.get().trim().is_empty()
-                                on:click=move |_| on_add()
-                            >
-                                "Hinzufügen"
-                            </button>
-                        </td>
-                    </tr>
-                </tfoot>
             </table>
         </div>
+        <button class="btn btn-ghost btn-sm mt-2" on:click=move |_| form.new_step(parent_step_id, branch)>
+            "+ Schritt hinzufügen"
+        </button>
     }
 }
 
-/// Die Eingabefelder einer Zeile; Enter speichert.
+/// Die Felder im Schritt-Modalfenster.
 #[component]
-fn DraftCells(draft: StepDraft, on_enter: impl Fn() + Copy + Send + Sync + 'static) -> impl IntoView {
-    let on_keydown = move |ev: leptos::ev::KeyboardEvent| {
-        if ev.key() == "Enter" {
-            on_enter();
-        }
-    };
-    let field = move |value: RwSignal<String>,
-                      placeholder: &'static str,
-                      list: Option<&'static str>,
-                      width: &'static str| {
+fn StepFormFields(draft: StepDraft) -> impl IntoView {
+    let field = move |value: RwSignal<String>, label: &'static str, list: Option<&'static str>| {
         view! {
-            <td>
-                <input
-                    class=format!("input input-sm w-full {width}")
-                    placeholder=placeholder
-                    list=list
-                    bind:value=value
-                    on:keydown=on_keydown
-                />
-            </td>
+            <label class="floating-label">
+                <span>{label}</span>
+                <input class="input w-full" placeholder=label list=list bind:value=value/>
+            </label>
         }
     };
 
     view! {
-        {field(draft.activity, "Aktivität", None, "min-w-28")}
-        {field(draft.role, "Rolle", Some("step-roles"), "min-w-24")}
-        {field(draft.input, "Input", None, "min-w-24")}
-        {field(draft.output, "Output", None, "min-w-24")}
-        {field(draft.condition, "Frage?", None, "min-w-32")}
-        {field(draft.system, "System", Some("step-systems"), "min-w-24")}
+        <label class="floating-label">
+            <span>"Aktivität"</span>
+            <input class="input w-full" placeholder="Aktivität" required bind:value=draft.activity/>
+        </label>
+        <div class="grid gap-4 sm:grid-cols-2">
+            {field(draft.role, "Rolle", Some("step-roles"))}
+            {field(draft.system, "System", Some("step-systems"))}
+            {field(draft.input, "Input", None)}
+            {field(draft.output, "Output", None)}
+        </div>
+        {field(draft.condition, "Bedingung (Frage, z. B. „Betrag > 1000?“)", None)}
     }
 }
 
@@ -442,27 +481,19 @@ fn StepRow(
     is_first: bool,
     is_last: bool,
     actions: StepActions,
+    form: StepForm,
 ) -> impl IntoView {
-    let editing = RwSignal::new(false);
-    let draft = StepDraft::new(step.fields());
-    let original = StoredValue::new(step.fields());
     let id = step.id;
+    let stored = StoredValue::new(step.clone());
+    let edit = move || stored.with_value(|step| form.edit(step));
 
-    let save = move || {
-        if draft.activity.get_untracked().trim().is_empty() {
-            return;
-        }
-        actions.update.dispatch(UpdateStep { id, fields: draft.fields() });
-        editing.set(false);
-    };
-    let cancel = move || {
-        draft.set(original.get_value());
-        editing.set(false);
-    };
-
-    let display = move || {
-        let step = step.clone();
-        view! {
+    view! {
+        <tr
+            class="hover:bg-base-200 cursor-pointer select-none"
+            title="Doppelklick zum Bearbeiten"
+            on:dblclick=move |_| edit()
+        >
+            <td class="text-base-content/60 whitespace-nowrap">{number}</td>
             <td class="font-medium">{step.activity}</td>
             <td><RoleBadge role=step.role/></td>
             <td>{step.input}</td>
@@ -474,28 +505,10 @@ fn StepRow(
                     on:click=move |_| { actions.move_step.dispatch(MoveStep { id, up: true }); }>"▲"</button>
                 <button class="btn btn-ghost btn-xs" title="Nach unten" disabled=is_last
                     on:click=move |_| { actions.move_step.dispatch(MoveStep { id, up: false }); }>"▼"</button>
-                <button class="btn btn-ghost btn-xs" title="Bearbeiten" on:click=move |_| editing.set(true)>"✎"</button>
+                <button class="btn btn-ghost btn-xs" title="Bearbeiten" on:click=move |_| edit()>"✎"</button>
                 <button class="btn btn-ghost btn-xs text-error" title="Löschen"
                     on:click=move |_| { actions.delete.dispatch(DeleteStep { id }); }>"✕"</button>
             </td>
-        }
-    };
-
-    view! {
-        <tr
-            class="hover:bg-base-200"
-            class:cursor-pointer=move || !editing.get()
-            title=move || (!editing.get()).then_some("Doppelklick zum Bearbeiten")
-            on:dblclick=move |_| editing.set(true)
-        >
-            <td class="text-base-content/60 whitespace-nowrap">{number}</td>
-            <Show when=move || editing.get() fallback=display>
-                <DraftCells draft on_enter=save/>
-                <td class="text-right whitespace-nowrap">
-                    <button class="btn btn-primary btn-xs" on:click=move |_| save()>"Speichern"</button>
-                    <button class="btn btn-ghost btn-xs" on:click=move |_| cancel()>"Abbrechen"</button>
-                </td>
-            </Show>
         </tr>
     }
 }
