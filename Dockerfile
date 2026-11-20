@@ -26,11 +26,16 @@ FROM chef AS builder
 # Abhängigkeiten vorab bauen. Diese Schichten bleiben im Cache, solange sich
 # Cargo.toml und Cargo.lock nicht ändern. Profil und Features müssen genau denen
 # entsprechen, mit denen cargo-leptos baut (siehe [package.metadata.leptos]).
+# cargo-leptos baut das WebAssembly in einen eigenen Ordner (target/front).
+# Leptos liest LEPTOS_OUTPUT_NAME beim Kompilieren; cargo-leptos setzt die Variable,
+# deshalb muss sie hier schon gleich sein, sonst wird Leptos neu gebaut.
+ENV LEPTOS_OUTPUT_NAME=workspace-hbe
 COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json \
         --no-default-features --features ssr
 RUN cargo chef cook --profile wasm-release --recipe-path recipe.json \
-        --target wasm32-unknown-unknown --no-default-features --features hydrate
+        --target wasm32-unknown-unknown --target-dir target/front \
+        --no-default-features --features hydrate
 
 # Ohne package-lock.json: Der Lockfile entsteht auf macOS und enthält die native
 # Linux-Variante von Tailwind (optionale Abhängigkeit) nicht.
