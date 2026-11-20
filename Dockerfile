@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
-# ---- Build: Server-Binary, WebAssembly und CSS mit cargo-leptos ----
-FROM rust:1-bookworm AS builder
+# ---- Basis: Rust, Node, WebAssembly-Ziel, cargo-leptos und cargo-chef ----
+FROM rust:1-bookworm AS chef
 
 # Node für Tailwind und das DaisyUI-Plugin; Tailwind 4 braucht Node >= 20, Debian liefert nur 18.
 COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
@@ -11,9 +11,27 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 RUN rustup target add wasm32-unknown-unknown
 RUN curl -L --proto '=https' --tlsv1.2 -sSf \
         https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash \
-    && cargo binstall cargo-leptos@0.3.11 --no-confirm
+    && cargo binstall cargo-leptos@0.3.11 cargo-chef@0.1.77 --no-confirm
 
 WORKDIR /app
+
+# ---- Planer: Rezept mit allen Abhängigkeiten aus Cargo.toml und Cargo.lock ----
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+# ---- Build: Server-Binary, WebAssembly und CSS mit cargo-leptos ----
+FROM chef AS builder
+
+# Abhängigkeiten vorab bauen. Diese Schichten bleiben im Cache, solange sich
+# Cargo.toml und Cargo.lock nicht ändern. Profil und Features müssen genau denen
+# entsprechen, mit denen cargo-leptos baut (siehe [package.metadata.leptos]).
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json \
+        --no-default-features --features ssr
+RUN cargo chef cook --profile wasm-release --recipe-path recipe.json \
+        --target wasm32-unknown-unknown --no-default-features --features hydrate
+
 # Ohne package-lock.json: Der Lockfile entsteht auf macOS und enthält die native
 # Linux-Variante von Tailwind (optionale Abhängigkeit) nicht.
 COPY package.json ./
