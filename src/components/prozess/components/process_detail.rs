@@ -2,9 +2,13 @@ use leptos::prelude::*;
 use leptos_router::{components::A, hooks::use_params_map};
 
 use super::process_model::ProcessModel;
-use crate::backend::prozess::model::{ProcessStep, StepFields, child_steps};
+use crate::backend::prozess::bpmn::{self, Level};
+use crate::backend::prozess::model::{
+    END_EVENTS, EVENT_TYPES, ELEMENTS, GATEWAYS, LOOP_TYPES, Process, ProcessStep, START_EVENTS,
+    StepFields, TASK_TYPES, branch_label, child_steps, has_branches,
+};
 use crate::backend::prozess::server_fns::{
-    AddStep, DeleteStep, MoveStep, UpdateStep, get_process, list_steps,
+    AddStep, DeleteStep, MoveStep, UpdateStep, get_process, list_processes, list_steps,
 };
 use crate::components::modal::FormModal;
 
@@ -43,19 +47,40 @@ struct StepDraft {
     system: RwSignal<String>,
     is_start: RwSignal<bool>,
     is_end: RwSignal<bool>,
+    element: RwSignal<String>,
+    task_type: RwSignal<String>,
+    event_type: RwSignal<String>,
+    loop_type: RwSignal<String>,
+    gateway: RwSignal<String>,
+    start_event: RwSignal<String>,
+    start_label: RwSignal<String>,
+    end_event: RwSignal<String>,
+    end_label: RwSignal<String>,
+    called_process_id: RwSignal<Option<i64>>,
 }
 
 impl StepDraft {
-    fn new(fields: StepFields) -> Self {
+    fn new() -> Self {
+        let f = StepFields::default();
         Self {
-            activity: RwSignal::new(fields.activity),
-            role: RwSignal::new(fields.role),
-            input: RwSignal::new(fields.input),
-            output: RwSignal::new(fields.output),
-            condition: RwSignal::new(fields.condition),
-            system: RwSignal::new(fields.system),
-            is_start: RwSignal::new(fields.is_start),
-            is_end: RwSignal::new(fields.is_end),
+            activity: RwSignal::new(f.activity),
+            role: RwSignal::new(f.role),
+            input: RwSignal::new(f.input),
+            output: RwSignal::new(f.output),
+            condition: RwSignal::new(f.condition),
+            system: RwSignal::new(f.system),
+            is_start: RwSignal::new(f.is_start),
+            is_end: RwSignal::new(f.is_end),
+            element: RwSignal::new(f.element),
+            task_type: RwSignal::new(f.task_type),
+            event_type: RwSignal::new(f.event_type),
+            loop_type: RwSignal::new(f.loop_type),
+            gateway: RwSignal::new(f.gateway),
+            start_event: RwSignal::new(f.start_event),
+            start_label: RwSignal::new(f.start_label),
+            end_event: RwSignal::new(f.end_event),
+            end_label: RwSignal::new(f.end_label),
+            called_process_id: RwSignal::new(f.called_process_id),
         }
     }
 
@@ -69,26 +94,52 @@ impl StepDraft {
             system: self.system.get_untracked(),
             is_start: self.is_start.get_untracked(),
             is_end: self.is_end.get_untracked(),
+            element: self.element.get_untracked(),
+            task_type: self.task_type.get_untracked(),
+            event_type: self.event_type.get_untracked(),
+            loop_type: self.loop_type.get_untracked(),
+            gateway: self.gateway.get_untracked(),
+            start_event: self.start_event.get_untracked(),
+            start_label: self.start_label.get_untracked(),
+            end_event: self.end_event.get_untracked(),
+            end_label: self.end_label.get_untracked(),
+            called_process_id: self.called_process_id.get_untracked(),
         }
     }
 
-    fn set(&self, fields: StepFields) {
-        self.activity.set(fields.activity);
-        self.role.set(fields.role);
-        self.input.set(fields.input);
-        self.output.set(fields.output);
-        self.condition.set(fields.condition);
-        self.system.set(fields.system);
-        self.is_start.set(fields.is_start);
-        self.is_end.set(fields.is_end);
+    fn set(&self, f: StepFields) {
+        self.activity.set(f.activity);
+        self.role.set(f.role);
+        self.input.set(f.input);
+        self.output.set(f.output);
+        self.condition.set(f.condition);
+        self.system.set(f.system);
+        self.is_start.set(f.is_start);
+        self.is_end.set(f.is_end);
+        self.element.set(f.element);
+        self.task_type.set(f.task_type);
+        self.event_type.set(f.event_type);
+        self.loop_type.set(f.loop_type);
+        self.gateway.set(f.gateway);
+        self.start_event.set(f.start_event);
+        self.start_label.set(f.start_label);
+        self.end_event.set(f.end_event);
+        self.end_label.set(f.end_label);
+        self.called_process_id.set(f.called_process_id);
+    }
+
+    /// Ein Zwischenereignis braucht einen Ereignistyp.
+    fn is_valid(&self) -> bool {
+        !self.activity.get().trim().is_empty()
+            && (self.element.get() != "Zwischenereignis" || !self.event_type.get().is_empty())
     }
 }
 
 /// Wohin ein Schritt aus dem Modalfenster gespeichert wird.
 #[derive(Clone, PartialEq)]
 enum StepTarget {
-    /// Neuer Schritt im Hauptablauf (`parent_step_id` leer) oder im Ja-/Nein-Zweig einer Bedingung.
-    New { parent_step_id: Option<i64>, branch: Option<String> },
+    /// Neuer Schritt im Hauptablauf (`parent_step_id` leer) oder in einem Zweig einer Verzweigung.
+    New { parent_step_id: Option<i64>, branch: Option<String>, label: Option<&'static str> },
     Edit(i64),
 }
 
@@ -103,15 +154,15 @@ struct StepForm {
 impl StepForm {
     fn new() -> Self {
         Self {
-            draft: StepDraft::new(StepFields::default()),
+            draft: StepDraft::new(),
             open: RwSignal::new(false),
-            target: RwSignal::new(StepTarget::New { parent_step_id: None, branch: None }),
+            target: RwSignal::new(StepTarget::New { parent_step_id: None, branch: None, label: None }),
         }
     }
 
-    fn new_step(&self, parent_step_id: Option<i64>, branch: Option<&str>) {
+    fn new_step(&self, parent_step_id: Option<i64>, branch: Option<&str>, label: Option<&'static str>) {
         self.draft.set(StepFields::default());
-        self.target.set(StepTarget::New { parent_step_id, branch: branch.map(str::to_string) });
+        self.target.set(StepTarget::New { parent_step_id, branch: branch.map(str::to_string), label });
         self.open.set(true);
     }
 
@@ -124,7 +175,7 @@ impl StepForm {
     fn title(&self) -> String {
         match self.target.get() {
             StepTarget::Edit(_) => "Schritt bearbeiten".to_string(),
-            StepTarget::New { branch: Some(branch), .. } => format!("Neuer Schritt im Zweig „{branch}“"),
+            StepTarget::New { label: Some(label), .. } => format!("Neuer Schritt im Zweig „{label}“"),
             StepTarget::New { .. } => "Neuer Schritt".to_string(),
         }
     }
@@ -149,6 +200,8 @@ pub fn ProcessDetailPage() -> impl IntoView {
     };
 
     let process = Resource::new(process_id, get_process);
+    // Andere Prozesse, die ein Teilprozess aufrufen kann.
+    let processes = Resource::new(|| (), |_| list_processes());
     let steps = Resource::new(
         move || {
             (
@@ -166,15 +219,15 @@ pub fn ProcessDetailPage() -> impl IntoView {
 
     let form = StepForm::new();
     let save_step = move || {
-        let fields = form.draft.fields();
-        if fields.activity.trim().is_empty() {
+        if !form.draft.is_valid() {
             return;
         }
+        let fields = form.draft.fields();
         match form.target.get_untracked() {
             StepTarget::Edit(id) => {
                 actions.update.dispatch(UpdateStep { id, fields });
             }
-            StepTarget::New { parent_step_id, branch } => {
+            StepTarget::New { parent_step_id, branch, .. } => {
                 actions.add.dispatch(AddStep { process_id: process_id(), parent_step_id, branch, fields });
             }
         }
@@ -249,18 +302,22 @@ pub fn ProcessDetailPage() -> impl IntoView {
                     <Transition fallback=|| view! { <span class="loading loading-spinner"></span> }>
                         {move || Suspend::new(async move {
                             let steps = steps.await.unwrap_or_default();
-                            match active_tab.get() {
+                            let name = process.await.map(|p| p.name).unwrap_or_default();
+                            let content = match active_tab.get() {
                                 DetailTab::Description => {
                                     let main = child_steps(&steps, None, None);
                                     view! {
                                         <Suggestions steps=steps.clone()/>
-                                        <StartEndHint steps=steps.clone()/>
                                         <StepTable group=main.clone() prefix=String::new() actions form/>
-                                        {condition_sections(&steps, &main, "", actions, form)}
+                                        {branch_sections(&steps, &main, "", actions, form)}
                                     }
                                     .into_any()
                                 }
-                                DetailTab::Model => view! { <ProcessModel steps/> }.into_any(),
+                                DetailTab::Model => view! { <ProcessModel name steps=steps.clone()/> }.into_any(),
+                            };
+                            view! {
+                                <BpmnCheck steps/>
+                                {content}
                             }
                         })}
                     </Transition>
@@ -271,50 +328,88 @@ pub fn ProcessDetailPage() -> impl IntoView {
                 open=form.open
                 title=Signal::derive(move || form.title())
                 on_submit=save_step
-                submit_disabled=Signal::derive(move || form.draft.activity.get().trim().is_empty())
+                submit_disabled=Signal::derive(move || !form.draft.is_valid())
             >
-                <StepFormFields draft=form.draft/>
+                <Transition fallback=|| ()>
+                    {move || Suspend::new(async move {
+                        let own = process_id();
+                        let others: Vec<Process> = processes
+                            .await
+                            .unwrap_or_default()
+                            .into_iter()
+                            .filter(|p| p.id != own)
+                            .collect();
+                        view! { <StepFormFields draft=form.draft processes=others/> }
+                    })}
+                </Transition>
             </FormModal>
         </div>
     }
 }
 
-/// Zeigt, welche Schritte Start- und Endpunkt sind, und wie fehlende Angaben ergänzt werden.
+/// Ergebnis der BPMN-Prüfung; bei Fehlern aufgeklappt.
 #[component]
-fn StartEndHint(steps: Vec<ProcessStep>) -> impl IntoView {
+fn BpmnCheck(steps: Vec<ProcessStep>) -> impl IntoView {
+    let findings = bpmn::check(&steps);
     if steps.is_empty() {
         return None;
     }
-    let start = steps.iter().find(|s| s.is_start).map(|s| s.activity.clone());
-    let ends: Vec<String> = steps.iter().filter(|s| s.is_end).map(|s| s.activity.clone()).collect();
+    let count = |level: Level| findings.iter().filter(|f| f.level == level).count();
+    let (errors, warnings, hints) = (count(Level::Fehler), count(Level::Warnung), count(Level::Hinweis));
 
-    let start_text = match start {
-        Some(activity) => format!("Startpunkt: „{activity}“"),
-        None => "Kein Startpunkt festgelegt – der erste Schritt gilt als Start.".to_string(),
-    };
-    let end_text = if ends.is_empty() {
-        "Kein Endpunkt festgelegt – der Prozess endet nach dem letzten Schritt.".to_string()
+    let summary = if findings.is_empty() {
+        "BPMN-Prüfung: keine Befunde".to_string()
     } else {
-        format!("Endpunkte: {}", ends.iter().map(|a| format!("„{a}“")).collect::<Vec<_>>().join(", "))
+        let parts: Vec<String> = [(errors, "Fehler", "Fehler"), (warnings, "Warnung", "Warnungen"), (hints, "Hinweis", "Hinweise")]
+            .into_iter()
+            .filter(|(n, ..)| *n > 0)
+            .map(|(n, one, many)| format!("{n} {}", if n == 1 { one } else { many }))
+            .collect();
+        format!("BPMN-Prüfung: {}", parts.join(", "))
     };
+    let (icon, tone) = match (errors, warnings) {
+        (0, 0) => ("✓", "border-success/40"),
+        (0, _) => ("!", "border-warning/50"),
+        _ => ("✕", "border-error/50"),
+    };
+
+    let items = findings
+        .into_iter()
+        .map(|f| {
+            let badge = match f.level {
+                Level::Fehler => "badge-error",
+                Level::Warnung => "badge-warning",
+                Level::Hinweis => "badge-info",
+            };
+            view! {
+                <li class="flex items-start gap-2">
+                    <span class=format!("badge badge-soft badge-sm shrink-0 {badge}")>{f.level.label()}</span>
+                    <span>{f.message}</span>
+                </li>
+            }
+        })
+        .collect_view();
 
     Some(view! {
-        <div class="mb-4 flex flex-wrap gap-x-6 gap-y-1 text-sm text-base-content/70">
-            <span class="flex items-center gap-2"><StartBadge/>{start_text}</span>
-            <span class="flex items-center gap-2"><EndBadge/>{end_text}</span>
-            <span class="text-base-content/50">"Festlegen per Doppelklick auf einen Schritt."</span>
-        </div>
+        <details class=format!("collapse collapse-arrow mb-4 border {tone} bg-base-100") open=errors > 0>
+            <summary class="collapse-title text-sm font-semibold">{format!("{icon} {summary}")}</summary>
+            <div class="collapse-content">
+                <ul class="space-y-1 text-sm">{items}</ul>
+            </div>
+        </details>
     })
 }
 
 #[component]
-fn StartBadge() -> impl IntoView {
-    view! { <span class="badge badge-soft badge-success badge-sm" title="Startpunkt">"▶ Start"</span> }
+fn StartBadge(event: String) -> impl IntoView {
+    let text = if event.is_empty() { "▶ Start".to_string() } else { format!("▶ Start · {event}") };
+    view! { <span class="badge badge-soft badge-success badge-sm" title="Startpunkt">{text}</span> }
 }
 
 #[component]
-fn EndBadge() -> impl IntoView {
-    view! { <span class="badge badge-soft badge-error badge-sm" title="Endpunkt">"■ Ende"</span> }
+fn EndBadge(event: String) -> impl IntoView {
+    let text = if event.is_empty() { "■ Ende".to_string() } else { format!("■ Ende · {event}") };
+    view! { <span class="badge badge-soft badge-error badge-sm" title="Endpunkt">{text}</span> }
 }
 
 /// Vorschläge für Rolle und System aus allen bisher erfassten Schritten.
@@ -340,9 +435,9 @@ fn Suggestions(steps: Vec<ProcessStep>) -> impl IntoView {
     }
 }
 
-/// Für jeden Schritt einer Ebene mit einer Frage in "Bedingung": je eine Tabelle für Ja und Nein.
-/// Zweige können selbst wieder Bedingungen enthalten, daher rekursiv.
-fn condition_sections(
+/// Für jeden Schritt einer Ebene mit einer Verzweigung: je eine Tabelle pro Zweig.
+/// Zweige können selbst wieder Verzweigungen enthalten, daher rekursiv.
+fn branch_sections(
     all: &[ProcessStep],
     group: &[ProcessStep],
     prefix: &str,
@@ -352,13 +447,10 @@ fn condition_sections(
     group
         .iter()
         .enumerate()
-        .filter(|(_, step)| {
-            !step.condition.trim().is_empty()
-                || all.iter().any(|s| s.parent_step_id == Some(step.id))
-        })
+        .filter(|(_, step)| has_branches(all, step))
         .map(|(i, step)| {
             view! {
-                <ConditionSection
+                <GatewaySection
                     all=all.to_vec()
                     step=step.clone()
                     number=format!("{prefix}{}", i + 1)
@@ -372,25 +464,32 @@ fn condition_sections(
 }
 
 #[component]
-fn ConditionSection(
+fn GatewaySection(
     all: Vec<ProcessStep>,
     step: ProcessStep,
     number: String,
     actions: StepActions,
     form: StepForm,
 ) -> impl IntoView {
-    let question = if step.condition.trim().is_empty() {
-        view! { <span class="text-warning">"Keine Frage erfasst – die Zweige bleiben gespeichert."</span> }
-            .into_any()
+    let (kind, question) = if step.is_parallel() {
+        (
+            "Parallele Verzweigung",
+            view! { <span>"Beide Zweige laufen gleichzeitig und werden wieder zusammengeführt."</span> }.into_any(),
+        )
+    } else if step.condition.trim().is_empty() {
+        (
+            "Exklusive Verzweigung",
+            view! { <span class="text-warning">"Keine Frage erfasst – bitte im Schritt ergänzen."</span> }.into_any(),
+        )
     } else {
-        view! { <span>{step.condition.clone()}</span> }.into_any()
+        ("Exklusive Verzweigung", view! { <span>{step.condition.clone()}</span> }.into_any())
     };
 
     view! {
         <section class="mt-8 space-y-4 border-l-4 border-warning/40 pl-4">
             <div>
                 <div class="text-xs text-base-content/60">
-                    {format!("Bedingung · Schritt {number}: {}", step.activity)}
+                    {format!("{kind} · Schritt {number}: {}", step.activity)}
                 </div>
                 <div class="font-semibold">{question}</div>
             </div>
@@ -409,21 +508,25 @@ fn BranchTable(
     actions: StepActions,
     form: StepForm,
 ) -> impl IntoView {
+    let parallel = parent.is_parallel();
+    let label = branch_label(parallel, branch);
     let group = child_steps(&all, Some(parent.id), Some(branch));
-    let prefix = format!("{number}.{}", &branch[..1]);
-    let (badge, border) = if branch == "Ja" {
-        ("badge-success", "border-success/40")
+    let prefix = if parallel {
+        format!("{number}.{}", if branch == "Ja" { "P1." } else { "P2." })
     } else {
-        ("badge-error", "border-error/40")
+        format!("{number}.{}", &branch[..1])
+    };
+    let (badge, border, text) = match (parallel, branch) {
+        (true, _) => ("badge-info", "border-info/40", "Schritte, die parallel ausgeführt werden".to_string()),
+        (false, "Ja") => ("badge-success", "border-success/40", format!("Schritte, wenn die Antwort „{label}“ ist")),
+        (false, _) => ("badge-error", "border-error/40", format!("Schritte, wenn die Antwort „{label}“ ist")),
     };
 
     view! {
         <div class=format!("rounded-box border {border}")>
             <div class="flex items-center gap-2 border-b border-base-300 bg-base-200/50 px-4 py-2">
-                <span class=format!("badge badge-soft {badge}")>{branch}</span>
-                <span class="text-sm text-base-content/70">
-                    {format!("Schritte, wenn die Antwort „{branch}“ ist")}
-                </span>
+                <span class=format!("badge badge-soft {badge}")>{label}</span>
+                <span class="text-sm text-base-content/70">{text}</span>
             </div>
             <div class="p-2">
                 <StepTable
@@ -433,9 +536,10 @@ fn BranchTable(
                     form
                     parent_step_id=parent.id
                     branch=branch
+                    label=label
                 />
             </div>
-            <div class="px-4 pb-4">{condition_sections(&all, &group, &prefix, actions, form)}</div>
+            <div class="px-4 pb-4">{branch_sections(&all, &group, &prefix, actions, form)}</div>
         </div>
     }
 }
@@ -447,10 +551,13 @@ fn StepTable(
     prefix: String,
     actions: StepActions,
     form: StepForm,
-    /// Schritt mit der Bedingung, zu dessen Zweig die Tabelle gehört; leer im Hauptablauf.
+    /// Schritt mit der Verzweigung, zu deren Zweig die Tabelle gehört; leer im Hauptablauf.
     #[prop(optional)]
     parent_step_id: Option<i64>,
     #[prop(optional)] branch: Option<&'static str>,
+    /// Anzeigename des Zweigs, z. B. "Ja" oder "Zweig 1".
+    #[prop(optional)]
+    label: Option<&'static str>,
 ) -> impl IntoView {
     let count = group.len();
     let rows = group
@@ -477,11 +584,12 @@ fn StepTable(
                     <tr>
                         <th class="w-12">"#"</th>
                         <th class="w-24">"Start/Ende"</th>
-                        <th>"Aktivität"</th>
+                        <th>"Element"</th>
+                        <th>"Bezeichnung"</th>
                         <th>"Rolle"</th>
                         <th>"Input"</th>
                         <th>"Output"</th>
-                        <th>"Bedingung"</th>
+                        <th>"Verzweigung"</th>
                         <th>"System"</th>
                         <th class="w-28"></th>
                     </tr>
@@ -489,15 +597,44 @@ fn StepTable(
                 <tbody>{rows}</tbody>
             </table>
         </div>
-        <button class="btn btn-ghost btn-sm mt-2" on:click=move |_| form.new_step(parent_step_id, branch)>
+        <button class="btn btn-ghost btn-sm mt-2" on:click=move |_| form.new_step(parent_step_id, branch, label)>
             "+ Schritt hinzufügen"
         </button>
     }
 }
 
+/// Auswahlfeld für einen der festen Werte; `empty` ist die Beschriftung des leeren Werts.
+#[component]
+fn Choice(
+    value: RwSignal<String>,
+    label: &'static str,
+    options: &'static [&'static str],
+    #[prop(optional)] empty: Option<&'static str>,
+) -> impl IntoView {
+    view! {
+        <label class="floating-label">
+            <span>{label}</span>
+            <select
+                class="select w-full"
+                prop:value=move || value.get()
+                on:change=move |ev| value.set(event_target_value(&ev))
+            >
+                {empty.is_none().then(|| view! { <option value="" disabled>"Bitte wählen"</option> })}
+                {options
+                    .iter()
+                    .map(|&option| {
+                        let text = if option.is_empty() { empty.unwrap_or("–") } else { option };
+                        view! { <option value=option selected=move || value.get() == option>{text}</option> }
+                    })
+                    .collect_view()}
+            </select>
+        </label>
+    }
+}
+
 /// Die Felder im Schritt-Modalfenster.
 #[component]
-fn StepFormFields(draft: StepDraft) -> impl IntoView {
+fn StepFormFields(draft: StepDraft, processes: Vec<Process>) -> impl IntoView {
     let field = move |value: RwSignal<String>, label: &'static str, list: Option<&'static str>| {
         view! {
             <label class="floating-label">
@@ -506,20 +643,64 @@ fn StepFormFields(draft: StepDraft) -> impl IntoView {
             </label>
         }
     };
+    let element_is = move |element: &'static str| move || draft.element.get() == element;
+
+    let process_options = processes
+        .into_iter()
+        .map(|p| {
+            let id = p.id;
+            view! {
+                <option value=id.to_string() selected=move || draft.called_process_id.get() == Some(id)>
+                    {p.name}
+                </option>
+            }
+        })
+        .collect_view();
 
     view! {
         <label class="floating-label">
-            <span>"Aktivität"</span>
-            <input class="input w-full" placeholder="Aktivität" required bind:value=draft.activity/>
+            <span>"Bezeichnung"</span>
+            <input
+                class="input w-full"
+                placeholder="Bezeichnung (z. B. „Rechnung prüfen“)"
+                required
+                bind:value=draft.activity
+            />
         </label>
         <div class="grid gap-4 sm:grid-cols-2">
-            {field(draft.role, "Rolle", Some("step-roles"))}
-            {field(draft.system, "System", Some("step-systems"))}
-            {field(draft.input, "Input", None)}
-            {field(draft.output, "Output", None)}
+            <Choice value=draft.element label="Element" options=ELEMENTS/>
+            <div class:hidden=move || !element_is("Aufgabe")()>
+                <Choice value=draft.task_type label="Aufgabentyp" options=TASK_TYPES empty="Ohne Typ"/>
+            </div>
+            <div class:hidden=move || !element_is("Zwischenereignis")()>
+                <Choice value=draft.event_type label="Ereignistyp" options=EVENT_TYPES/>
+            </div>
+            <label class="floating-label" class:hidden=move || !element_is("Teilprozess")()>
+                <span>"Aufgerufener Prozess"</span>
+                <select
+                    class="select w-full"
+                    prop:value=move || draft.called_process_id.get().map(|id| id.to_string()).unwrap_or_default()
+                    on:change=move |ev| draft.called_process_id.set(event_target_value(&ev).parse().ok())
+                >
+                    <option value="" selected=move || draft.called_process_id.get().is_none()>"Keiner (eingebettet)"</option>
+                    {process_options}
+                </select>
+            </label>
         </div>
-        {field(draft.condition, "Bedingung (Frage, z. B. „Betrag > 1000?“)", None)}
-        <div class="space-y-2">
+        <div class="grid gap-4 sm:grid-cols-2">
+            {field(draft.role, "Rolle (Bahn)", Some("step-roles"))}
+            {field(draft.system, "System", Some("step-systems"))}
+            {field(draft.input, "Input (Datenobjekt)", None)}
+            {field(draft.output, "Output (Datenobjekt)", None)}
+            <div class:hidden=element_is("Zwischenereignis")>
+                <Choice value=draft.loop_type label="Wiederholung" options=LOOP_TYPES empty="Keine"/>
+            </div>
+            <Choice value=draft.gateway label="Verzweigung danach" options=GATEWAYS empty="Keine"/>
+        </div>
+        <div class:hidden=move || draft.gateway.get() != "Exklusiv">
+            {field(draft.condition, "Frage der Verzweigung (z. B. „Betrag > 1000?“)", None)}
+        </div>
+        <div class="space-y-3">
             <label class="flex cursor-pointer items-center gap-3">
                 <input type="checkbox" class="checkbox checkbox-success checkbox-sm" bind:checked=draft.is_start/>
                 <span>
@@ -529,17 +710,46 @@ fn StepFormFields(draft: StepDraft) -> impl IntoView {
                     </span>
                 </span>
             </label>
+            <div class="grid gap-4 pl-8 sm:grid-cols-2" class:hidden=move || !draft.is_start.get()>
+                <Choice value=draft.start_event label="Auslöser" options=START_EVENTS empty="Ohne (Blanko)"/>
+                {field(draft.start_label, "Startereignis (z. B. „Antrag eingegangen“)", None)}
+            </div>
             <label class="flex cursor-pointer items-center gap-3">
                 <input type="checkbox" class="checkbox checkbox-error checkbox-sm" bind:checked=draft.is_end/>
                 <span>
                     "Endpunkt"
                     <span class="block text-xs text-base-content/60">
-                        "Der Prozess endet nach diesem Schritt (bei einer Bedingung nach der Zusammenführung)."
+                        "Der Prozess endet nach diesem Schritt (bei einer Verzweigung nach der Zusammenführung)."
                     </span>
                 </span>
             </label>
+            <div class="grid gap-4 pl-8 sm:grid-cols-2" class:hidden=move || !draft.is_end.get()>
+                <Choice value=draft.end_event label="Ergebnis" options=END_EVENTS empty="Ohne (Blanko)"/>
+                {field(draft.end_label, "Endereignis (z. B. „Antrag abgelehnt“)", None)}
+            </div>
         </div>
     }
+}
+
+/// Element mit Typ und Wiederholung für die Tabelle, z. B. "Aufgabe · Benutzer ↻".
+fn element_text(step: &ProcessStep) -> String {
+    let mut text = match step.element.as_str() {
+        "Zwischenereignis" => format!("◎ {}", step.event_type),
+        "Teilprozess" => match &step.called_process_name {
+            Some(name) => format!("⊞ Teilprozess → {name}"),
+            None => "⊞ Teilprozess".to_string(),
+        },
+        _ if step.task_type.is_empty() => "▭ Aufgabe".to_string(),
+        _ => format!("▭ {}", step.task_type),
+    };
+    let marker = match step.loop_type.as_str() {
+        "Schleife" => " ↻",
+        "Mehrfach parallel" => " ⦀",
+        "Mehrfach sequenziell" => " ☰",
+        _ => "",
+    };
+    text.push_str(marker);
+    text
 }
 
 #[component]
@@ -554,6 +764,12 @@ fn StepRow(
     let id = step.id;
     let stored = StoredValue::new(step.clone());
     let edit = move || stored.with_value(|step| form.edit(step));
+    let element = element_text(&step);
+    let gateway = match step.gateway.as_str() {
+        "Parallel" => view! { <span>"+ parallel"</span> }.into_any(),
+        "Exklusiv" => view! { <span class="italic">{format!("✕ {}", step.condition)}</span> }.into_any(),
+        _ => ().into_any(),
+    };
 
     view! {
         <tr
@@ -563,16 +779,17 @@ fn StepRow(
         >
             <td class="text-base-content/60 whitespace-nowrap">{number}</td>
             <td class="whitespace-nowrap">
-                <div class="flex gap-1">
-                    {step.is_start.then(|| view! { <StartBadge/> })}
-                    {step.is_end.then(|| view! { <EndBadge/> })}
+                <div class="flex flex-col items-start gap-1">
+                    {step.is_start.then(|| view! { <StartBadge event=step.start_event.clone()/> })}
+                    {step.is_end.then(|| view! { <EndBadge event=step.end_event.clone()/> })}
                 </div>
             </td>
+            <td class="whitespace-nowrap text-base-content/70">{element}</td>
             <td class="font-medium">{step.activity}</td>
             <td><RoleBadge role=step.role/></td>
             <td>{step.input}</td>
             <td>{step.output}</td>
-            <td class="italic">{step.condition}</td>
+            <td>{gateway}</td>
             <td>{step.system}</td>
             <td class="text-right whitespace-nowrap">
                 <button class="btn btn-ghost btn-xs" title="Nach oben" disabled=is_first
