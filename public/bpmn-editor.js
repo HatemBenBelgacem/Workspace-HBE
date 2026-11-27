@@ -1,12 +1,12 @@
 // Brücke zwischen der Leptos-Oberfläche und dem BPMN-2.0-Editor bpmn-js (https://bpmn.io).
 //
-// Die Bibliothek wird erst geladen, wenn ein Editor geöffnet wird. Rust ruft die Funktionen
-// unter `window.hbeBpmn` auf (siehe src/components/bpmn/components/editor_js.rs).
+// Die Bibliothek (bpmn-js mit Token-Simulation) liegt als eigenes Bundle unter /vendor/bpmn/
+// (gebaut in tools/bpmn-bundle) und wird erst geladen, wenn ein Editor geöffnet wird.
+// Rust ruft die Funktionen unter `window.hbeBpmn` auf (siehe src/components/bpmn/components/editor_js.rs).
 (function () {
   "use strict";
 
-  var VERSION = "18.31.1";
-  var BASE = "https://cdn.jsdelivr.net/npm/bpmn-js@" + VERSION + "/dist/";
+  var BASE = "/vendor/bpmn/";
 
   // Deutsche Texte für Palette, Kontextmenü und Elementauswahl.
   var GERMAN = {
@@ -111,6 +111,50 @@
     "Sub-processes": "Teilprozesse",
     "Data objects": "Datenobjekte",
     "Participants": "Teilnehmer",
+    // Token-Simulation
+    "Token Simulation": "Token-Simulation",
+    "Play Simulation": "Simulation fortsetzen",
+    "Pause Simulation": "Simulation anhalten",
+    "Play/Pause Simulation": "Simulation fortsetzen/anhalten",
+    "Reset Simulation": "Simulation zurücksetzen",
+    "Toggle Simulation Log": "Protokoll ein-/ausblenden",
+    "Simulation Log": "Simulationsprotokoll",
+    "Set animation speed = {speed}": "Geschwindigkeit {speed}",
+    "Set Sequence Flow": "Ausgehenden Fluss wählen",
+    "Trigger Event": "Ereignis auslösen",
+    "Focus process instance {scopeId}": "Prozessinstanz {scopeId} hervorheben",
+    "Found unsupported elements": "Nicht unterstützte Elemente gefunden",
+    "Not supported": "Nicht unterstützt",
+    "No Entries": "Keine Einträge",
+    "Close": "Schliessen",
+    "Finished": "Beendet",
+    "{name} started": "{name} gestartet",
+    "{name} finished": "{name} beendet",
+    "{name} canceled": "{name} abgebrochen",
+    "Process started": "Prozess gestartet",
+    "Process finished": "Prozess beendet",
+    "Process canceled": "Prozess abgebrochen",
+    "SubProcess started": "Teilprozess gestartet",
+    "SubProcess finished": "Teilprozess beendet",
+    "SubProcess canceled": "Teilprozess abgebrochen",
+    "Slow": "langsam",
+    "Normal": "normal",
+    "Fast": "schnell",
+    "Start Event": "Startereignis",
+    "End Event": "Endereignis",
+    "Boundary Event": "Randereignis",
+    "Intermediate Event": "Zwischenereignis",
+    "Exclusive Gateway": "Exklusives Gateway",
+    "Inclusive Gateway": "Inklusives Gateway",
+    "Parallel Gateway": "Paralleles Gateway",
+    "User Task": "Benutzeraufgabe",
+    "Manual Task": "Manuelle Aufgabe",
+    "Service Task": "Serviceaufgabe",
+    "Script Task": "Skriptaufgabe",
+    "Business Rule Task": "Geschäftsregelaufgabe",
+    "Send Task": "Sendeaufgabe",
+    "Receive Task": "Empfangsaufgabe",
+    "Call Activity": "Aufruf-Aktivität",
   };
 
   function translate(template, replacements) {
@@ -126,20 +170,18 @@
   function loadLibrary() {
     if (window.BpmnJS) return Promise.resolve();
     if (loading) return loading;
-    ["assets/diagram-js.css", "assets/bpmn-js.css", "assets/bpmn-font/css/bpmn.css"].forEach(function (file) {
-      var link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = BASE + file;
-      document.head.appendChild(link);
-    });
+    var link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = BASE + "bpmn.css";
+    document.head.appendChild(link);
     loading = new Promise(function (resolve, reject) {
       var script = document.createElement("script");
-      script.src = BASE + "bpmn-modeler.production.min.js";
+      script.src = BASE + "bpmn.js";
       script.onload = function () { resolve(); };
       script.onerror = function () {
         loading = null;
         script.remove();
-        reject(new Error("Der BPMN-Editor konnte nicht geladen werden (keine Verbindung zu cdn.jsdelivr.net?)."));
+        reject(new Error("Der BPMN-Editor konnte nicht geladen werden."));
       };
       document.head.appendChild(script);
     });
@@ -206,17 +248,25 @@
 
   window.hbeBpmn = {
     // Erstellt den Editor im Element `container` und lädt das XML.
-    // onChange(xml) bei jeder Änderung, onSave() bei Strg+S, onError(text) bei Problemen.
-    mount: function (container, xml, onChange, onSave, onError) {
+    // onChange(xml) bei jeder Änderung, onSave() bei Strg+S, onError(text) bei Problemen,
+    // onSimulation(aktiv) beim Ein- und Ausschalten der Token-Simulation.
+    mount: function (container, xml, onChange, onSave, onError, onSimulation) {
       this.destroy();
-      var editor = { modeler: null, onChange: onChange, onSave: onSave, onError: onError, dirty: false };
+      var editor = {
+        modeler: null, onChange: onChange, onSave: onSave, onError: onError, onSimulation: onSimulation,
+        dirty: false, simulating: false,
+      };
       current = editor;
       loadLibrary()
         .then(function () {
           if (current !== editor) return;
           editor.modeler = new window.BpmnJS({
             container: container,
-            additionalModules: [{ translate: ["value", translate] }],
+            additionalModules: [window.BpmnTokenSimulation, { translate: ["value", translate] }],
+          });
+          editor.modeler.on("tokenSimulation.toggleMode", function (event) {
+            editor.simulating = !!event.active;
+            if (current === editor) editor.onSimulation(editor.simulating);
           });
           editor.modeler.on("commandStack.changed", function (event) {
             // Beim Laden wird der Verlauf geleert; das ist keine Änderung.
@@ -241,11 +291,17 @@
     },
 
     undo: function () {
-      if (current && current.modeler) current.modeler.get("commandStack").undo();
+      if (current && current.modeler && !current.simulating) current.modeler.get("commandStack").undo();
     },
 
     redo: function () {
-      if (current && current.modeler) current.modeler.get("commandStack").redo();
+      if (current && current.modeler && !current.simulating) current.modeler.get("commandStack").redo();
+    },
+
+    // Schaltet die Token-Simulation ein oder aus. Im Simulationsmodus ist das Modell gesperrt;
+    // ein Klick auf das Play-Symbol am Startereignis schickt einen Token durch den Prozess.
+    toggleSimulation: function () {
+      if (current && current.modeler) current.modeler.get("toggleMode").toggleMode();
     },
 
     zoom: function (step) {
@@ -257,7 +313,7 @@
     // Öffnet die Dateiauswahl und ersetzt das Diagramm durch die gewählte .bpmn-Datei.
     importFile: function () {
       var editor = current;
-      if (!editor || !editor.modeler) return;
+      if (!editor || !editor.modeler || editor.simulating) return;
       var input = document.createElement("input");
       input.type = "file";
       input.accept = ".bpmn,.xml,application/xml,text/xml";

@@ -1,0 +1,15 @@
+{
+  "name": "workspace-hbe-bpmn-bundle",
+  "private": true,
+  "description": "Baut bpmn-js mit Token-Simulation zu einem Bundle für public/vendor/bpmn/",
+  "scripts": {
+    "build": "esbuild entry.js --bundle --minify --format=iife --target=es2020 --outdir=../../public/vendor/bpmn --entry-names=bpmn --asset-names=[name]-[hash] --loader:.woff=file --loader:.woff2=file --loader:.ttf=file --loader:.eot=file --loader:.svg=dataurl --legal-comments=linked"
+  },
+  "dependencies": {
+    "bpmn-js": "18.31.1",
+    "bpmn-js-token-simulation": "1.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.10"
+  }
+}

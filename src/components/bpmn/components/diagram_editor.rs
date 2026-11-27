@@ -47,6 +47,8 @@ fn Editor(diagram: BpmnDiagramContent) -> impl IntoView {
     let xml = RwSignal::new(diagram.xml);
     let dirty = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
+    // Token-Simulation aktiv? Dann ist das Modell gesperrt.
+    let simulating = RwSignal::new(false);
 
     let save = ServerAction::<SaveDiagramXml>::new();
     // Der gespeicherte Stand; Änderungen während des Speicherns bleiben ungespeichert markiert.
@@ -113,7 +115,9 @@ fn Editor(diagram: BpmnDiagramContent) -> impl IntoView {
             let on_save = Closure::<dyn FnMut()>::new(do_save).into_js_value();
             let on_error = Closure::<dyn FnMut(String)>::new(move |message: String| error.set(Some(message)))
                 .into_js_value();
-            editor_js::mount(el.as_ref(), &initial, &on_change, &on_save, &on_error);
+            let on_simulation = Closure::<dyn FnMut(bool)>::new(move |active: bool| simulating.set(active))
+                .into_js_value();
+            editor_js::mount(el.as_ref(), &initial, &on_change, &on_save, &on_error, &on_simulation);
         });
     }
     #[cfg(not(feature = "hydrate"))]
@@ -175,11 +179,20 @@ fn Editor(diagram: BpmnDiagramContent) -> impl IntoView {
             }}
 
             <div class="flex flex-wrap items-center gap-2">
+                <button
+                    class="btn btn-sm"
+                    class:btn-accent=move || !simulating.get()
+                    class:btn-error=move || simulating.get()
+                    title="Token-Simulation ein- oder ausschalten (T)"
+                    on:click=move |_| editor_js::toggle_simulation()
+                >
+                    {move || if simulating.get() { "■ Simulation beenden" } else { "▶ Simulation" }}
+                </button>
                 <div class="join">
-                    <button class="btn btn-sm join-item" title="Rückgängig (Strg+Z)" on:click=move |_| editor_js::undo()>
+                    <button class="btn btn-sm join-item" title="Rückgängig (Strg+Z)" disabled=move || simulating.get() on:click=move |_| editor_js::undo()>
                         "↶ Rückgängig"
                     </button>
-                    <button class="btn btn-sm join-item" title="Wiederholen (Strg+Y)" on:click=move |_| editor_js::redo()>
+                    <button class="btn btn-sm join-item" title="Wiederholen (Strg+Y)" disabled=move || simulating.get() on:click=move |_| editor_js::redo()>
                         "↷ Wiederholen"
                     </button>
                 </div>
@@ -191,7 +204,7 @@ fn Editor(diagram: BpmnDiagramContent) -> impl IntoView {
                     <button class="btn btn-sm join-item" title="Vergrössern" on:click=move |_| editor_js::zoom(1)>"+"</button>
                 </div>
                 <div class="join">
-                    <button class="btn btn-sm join-item" title="BPMN-2.0-Datei (.bpmn) laden" on:click=move |_| editor_js::import_file()>
+                    <button class="btn btn-sm join-item" title="BPMN-2.0-Datei (.bpmn) laden" disabled=move || simulating.get() on:click=move |_| editor_js::import_file()>
                         "Importieren"
                     </button>
                     <button class="btn btn-sm join-item" title="Als BPMN-2.0-XML herunterladen" on:click=move |_| editor_js::export_xml(&file_name())>
@@ -202,11 +215,22 @@ fn Editor(diagram: BpmnDiagramContent) -> impl IntoView {
                     </button>
                 </div>
                 <span class="text-sm text-base-content/60">
-                    "Elemente aus der Palette links ziehen, Doppelklick zum Beschriften, Schraubenschlüssel ändert den Typ."
+                    {move || {
+                        if simulating.get() {
+                            "Simulation: ▶ am Startereignis schickt einen Token los. An exklusiven Gateways den Fluss wählen, \
+                             an Zwischenereignissen auslösen. Das Modell ist währenddessen gesperrt."
+                        } else {
+                            "Elemente aus der Palette links ziehen, Doppelklick zum Beschriften, Schraubenschlüssel ändert den Typ."
+                        }
+                    }}
                 </span>
             </div>
 
-            <div class="relative flex-1 overflow-hidden rounded-box border border-base-300 bg-base-100 shadow-sm">
+            <div
+                class="relative flex-1 overflow-hidden rounded-box border bg-base-100 shadow-sm"
+                class:border-base-300=move || !simulating.get()
+                class:border-accent=move || simulating.get()
+            >
                 <div node_ref=canvas class="bpmn-canvas absolute inset-0"></div>
             </div>
 

@@ -1,3 +1,6 @@
 @import "tailwindcss";
 @source "../src/**/*.rs";
 @plugin "../node_modules/daisyui/index.js";
+/* Das gebaute BPMN-Bundle nicht nach Klassennamen durchsuchen. */
+@source not "../public/vendor";
+@source not "../tools";
