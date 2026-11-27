@@ -40,6 +40,7 @@ async fn main() {
             },
         )
         .fallback(leptos_axum::file_and_error_handler(shell))
+        .layer(axum::middleware::from_fn(cache_control))
         .with_state(leptos_options);
 
     log!("listening on http://{}", &addr);
@@ -47,6 +48,30 @@ async fn main() {
     axum::serve(listener, app.into_make_service())
         .await
         .unwrap();
+}
+
+/// Legt fest, wie lange der Browser Antworten zwischenspeichern darf.
+///
+/// Dateien unter /pkg tragen einen Hash im Namen (`hash-files` in Cargo.toml) und ändern sich nie,
+/// sie dürfen dauerhaft im Cache bleiben. Alles andere (Seiten, Server-Funktionen, Dateien aus
+/// `public/`) muss der Browser bei jedem Aufruf prüfen, sonst passt nach einem Deployment
+/// die zwischengespeicherte Oberfläche nicht mehr zum Server.
+#[cfg(feature = "ssr")]
+async fn cache_control(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::http::{HeaderValue, header::CACHE_CONTROL};
+
+    let immutable = request.uri().path().starts_with("/pkg/");
+    let mut response = next.run(request).await;
+    let value = if immutable && response.status().is_success() {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    };
+    response.headers_mut().insert(CACHE_CONTROL, HeaderValue::from_static(value));
+    response
 }
 
 #[cfg(not(feature = "ssr"))]

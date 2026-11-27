@@ -41,6 +41,9 @@ panic = "abort"
 
 [package.metadata.leptos]
 output-name = "workspace-hbe"
+# Dateinamen unter /pkg enthalten einen Hash des Inhalts. So lädt der Browser nach einem
+# Deployment sicher die neue Version statt einer zwischengespeicherten alten.
+hash-files = true
 site-root = "target/site"
 site-pkg-dir = "pkg"
 tailwind-input-file = "styles/input.css"
