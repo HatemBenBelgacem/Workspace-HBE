@@ -1,3 +1,4 @@
+pub mod bpmn;
 // Rust erlaubt keine Umlaute in Modulnamen, der Ordner heisst wie in CLAUDE.md vorgegeben.
 #[path = "entität/mod.rs"]
 pub mod entitaet;
