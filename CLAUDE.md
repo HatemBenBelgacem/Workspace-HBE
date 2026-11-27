@@ -86,6 +86,10 @@ Weitere Dateien:
 - SQL mit `sqlx::query` / `query_as` / `query_scalar` zur Laufzeit, **keine** `query!`-Makros
   (es gibt keinen Offline-Cache für SQLx).
 - Fehler in Server-Funktionen über `db::err` umwandeln, Pflichtfelder mit `db::required` prüfen.
+- **Browser-Cache:** Dateien unter `/pkg` tragen einen Hash im Namen (`hash-files = true` in `Cargo.toml`)
+  und werden dauerhaft gecacht; alles andere liefert der Server mit `Cache-Control: no-cache` aus
+  (`cache_control` in `src/main.rs`). Das Stylesheet deshalb nur über `HashedStylesheet` einbinden,
+  nie mit festem Pfad. Im Docker-Image muss `hash.txt` neben dem Binary liegen.
 - Bestehende Migrationen nie ändern, sondern eine neue Datei anlegen.
 - Styling mit Tailwind- und DaisyUI-Klassen direkt in den `view!`-Makros.
 - Routen auf Deutsch (`/prozesse`, `/entitaeten`).
