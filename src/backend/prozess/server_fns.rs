@@ -52,7 +52,7 @@ pub async fn list_steps(process_id: i64) -> Result<Vec<ProcessStep>, ServerFnErr
     let pool = db::pool()?;
     sqlx::query_as(
         "SELECT id, process_id, position, activity, role, input, output, condition, system,
-                parent_step_id, branch
+                parent_step_id, branch, is_start, is_end
          FROM process_steps WHERE process_id = $1 ORDER BY position, id",
     )
     .bind(process_id)
@@ -76,15 +76,20 @@ pub async fn add_step(
         return Err(ServerFnError::new("Ungültiger Zweig"));
     }
     let pool = db::pool()?;
+    let mut tx = pool.begin().await.map_err(db::err)?;
+    if fields.is_start {
+        clear_start(&mut tx, process_id).await?;
+    }
     sqlx::query(
         "INSERT INTO process_steps
-             (process_id, parent_step_id, branch, position, activity, role, input, output, condition, system)
+             (process_id, parent_step_id, branch, position, activity, role, input, output, condition, system,
+              is_start, is_end)
          VALUES ($1, $2, $3,
                  (SELECT COALESCE(MAX(position), 0) + 1 FROM process_steps
                   WHERE process_id = $1
                     AND parent_step_id IS NOT DISTINCT FROM $2
                     AND branch IS NOT DISTINCT FROM $3),
-                 $4, $5, $6, $7, $8, $9)",
+                 $4, $5, $6, $7, $8, $9, $10, $11)",
     )
     .bind(process_id)
     .bind(parent_step_id)
@@ -95,9 +100,26 @@ pub async fn add_step(
     .bind(fields.output.trim())
     .bind(fields.condition.trim())
     .bind(fields.system.trim())
-    .execute(&pool)
+    .bind(fields.is_start)
+    .bind(fields.is_end)
+    .execute(&mut *tx)
     .await
     .map_err(db::err)?;
+    tx.commit().await.map_err(db::err)?;
+    Ok(())
+}
+
+/// Entfernt den bisherigen Startpunkt, damit ein anderer Schritt Startpunkt werden kann.
+#[cfg(feature = "ssr")]
+async fn clear_start(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    process_id: i64,
+) -> Result<(), ServerFnError> {
+    sqlx::query("UPDATE process_steps SET is_start = false WHERE process_id = $1 AND is_start")
+        .bind(process_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(db::err)?;
     Ok(())
 }
 
@@ -105,9 +127,20 @@ pub async fn add_step(
 pub async fn update_step(id: i64, fields: StepFields) -> Result<(), ServerFnError> {
     db::required(&fields.activity, "Aktivität")?;
     let pool = db::pool()?;
+    let mut tx = pool.begin().await.map_err(db::err)?;
+    if fields.is_start {
+        let process_id: i64 = sqlx::query_scalar("SELECT process_id FROM process_steps WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db::err)?
+            .ok_or_else(|| ServerFnError::new("Schritt nicht gefunden"))?;
+        clear_start(&mut tx, process_id).await?;
+    }
     sqlx::query(
         "UPDATE process_steps
-         SET activity = $2, role = $3, input = $4, output = $5, condition = $6, system = $7
+         SET activity = $2, role = $3, input = $4, output = $5, condition = $6, system = $7,
+             is_start = $8, is_end = $9
          WHERE id = $1",
     )
     .bind(id)
@@ -117,9 +150,12 @@ pub async fn update_step(id: i64, fields: StepFields) -> Result<(), ServerFnErro
     .bind(fields.output.trim())
     .bind(fields.condition.trim())
     .bind(fields.system.trim())
-    .execute(&pool)
+    .bind(fields.is_start)
+    .bind(fields.is_end)
+    .execute(&mut *tx)
     .await
     .map_err(db::err)?;
+    tx.commit().await.map_err(db::err)?;
     Ok(())
 }
 

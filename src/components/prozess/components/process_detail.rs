@@ -41,6 +41,8 @@ struct StepDraft {
     output: RwSignal<String>,
     condition: RwSignal<String>,
     system: RwSignal<String>,
+    is_start: RwSignal<bool>,
+    is_end: RwSignal<bool>,
 }
 
 impl StepDraft {
@@ -52,6 +54,8 @@ impl StepDraft {
             output: RwSignal::new(fields.output),
             condition: RwSignal::new(fields.condition),
             system: RwSignal::new(fields.system),
+            is_start: RwSignal::new(fields.is_start),
+            is_end: RwSignal::new(fields.is_end),
         }
     }
 
@@ -63,6 +67,8 @@ impl StepDraft {
             output: self.output.get_untracked(),
             condition: self.condition.get_untracked(),
             system: self.system.get_untracked(),
+            is_start: self.is_start.get_untracked(),
+            is_end: self.is_end.get_untracked(),
         }
     }
 
@@ -73,6 +79,8 @@ impl StepDraft {
         self.output.set(fields.output);
         self.condition.set(fields.condition);
         self.system.set(fields.system);
+        self.is_start.set(fields.is_start);
+        self.is_end.set(fields.is_end);
     }
 }
 
@@ -246,6 +254,7 @@ pub fn ProcessDetailPage() -> impl IntoView {
                                     let main = child_steps(&steps, None, None);
                                     view! {
                                         <Suggestions steps=steps.clone()/>
+                                        <StartEndHint steps=steps.clone()/>
                                         <StepTable group=main.clone() prefix=String::new() actions form/>
                                         {condition_sections(&steps, &main, "", actions, form)}
                                     }
@@ -268,6 +277,44 @@ pub fn ProcessDetailPage() -> impl IntoView {
             </FormModal>
         </div>
     }
+}
+
+/// Zeigt, welche Schritte Start- und Endpunkt sind, und wie fehlende Angaben ergänzt werden.
+#[component]
+fn StartEndHint(steps: Vec<ProcessStep>) -> impl IntoView {
+    if steps.is_empty() {
+        return None;
+    }
+    let start = steps.iter().find(|s| s.is_start).map(|s| s.activity.clone());
+    let ends: Vec<String> = steps.iter().filter(|s| s.is_end).map(|s| s.activity.clone()).collect();
+
+    let start_text = match start {
+        Some(activity) => format!("Startpunkt: „{activity}“"),
+        None => "Kein Startpunkt festgelegt – der erste Schritt gilt als Start.".to_string(),
+    };
+    let end_text = if ends.is_empty() {
+        "Kein Endpunkt festgelegt – der Prozess endet nach dem letzten Schritt.".to_string()
+    } else {
+        format!("Endpunkte: {}", ends.iter().map(|a| format!("„{a}“")).collect::<Vec<_>>().join(", "))
+    };
+
+    Some(view! {
+        <div class="mb-4 flex flex-wrap gap-x-6 gap-y-1 text-sm text-base-content/70">
+            <span class="flex items-center gap-2"><StartBadge/>{start_text}</span>
+            <span class="flex items-center gap-2"><EndBadge/>{end_text}</span>
+            <span class="text-base-content/50">"Festlegen per Doppelklick auf einen Schritt."</span>
+        </div>
+    })
+}
+
+#[component]
+fn StartBadge() -> impl IntoView {
+    view! { <span class="badge badge-soft badge-success badge-sm" title="Startpunkt">"▶ Start"</span> }
+}
+
+#[component]
+fn EndBadge() -> impl IntoView {
+    view! { <span class="badge badge-soft badge-error badge-sm" title="Endpunkt">"■ Ende"</span> }
 }
 
 /// Vorschläge für Rolle und System aus allen bisher erfassten Schritten.
@@ -429,6 +476,7 @@ fn StepTable(
                 <thead>
                     <tr>
                         <th class="w-12">"#"</th>
+                        <th class="w-24">"Start/Ende"</th>
                         <th>"Aktivität"</th>
                         <th>"Rolle"</th>
                         <th>"Input"</th>
@@ -471,6 +519,26 @@ fn StepFormFields(draft: StepDraft) -> impl IntoView {
             {field(draft.output, "Output", None)}
         </div>
         {field(draft.condition, "Bedingung (Frage, z. B. „Betrag > 1000?“)", None)}
+        <div class="space-y-2">
+            <label class="flex cursor-pointer items-center gap-3">
+                <input type="checkbox" class="checkbox checkbox-success checkbox-sm" bind:checked=draft.is_start/>
+                <span>
+                    "Startpunkt"
+                    <span class="block text-xs text-base-content/60">
+                        "Einstieg in den Prozess. Ein anderer Startpunkt wird dabei aufgehoben."
+                    </span>
+                </span>
+            </label>
+            <label class="flex cursor-pointer items-center gap-3">
+                <input type="checkbox" class="checkbox checkbox-error checkbox-sm" bind:checked=draft.is_end/>
+                <span>
+                    "Endpunkt"
+                    <span class="block text-xs text-base-content/60">
+                        "Der Prozess endet nach diesem Schritt (bei einer Bedingung nach der Zusammenführung)."
+                    </span>
+                </span>
+            </label>
+        </div>
     }
 }
 
@@ -494,6 +562,12 @@ fn StepRow(
             on:dblclick=move |_| edit()
         >
             <td class="text-base-content/60 whitespace-nowrap">{number}</td>
+            <td class="whitespace-nowrap">
+                <div class="flex gap-1">
+                    {step.is_start.then(|| view! { <StartBadge/> })}
+                    {step.is_end.then(|| view! { <EndBadge/> })}
+                </div>
+            </td>
             <td class="font-medium">{step.activity}</td>
             <td><RoleBadge role=step.role/></td>
             <td>{step.input}</td>

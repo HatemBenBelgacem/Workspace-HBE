@@ -24,6 +24,10 @@ pub struct ProcessStep {
     pub parent_step_id: Option<i64>,
     /// "Ja" oder "Nein"; leer bei Schritten des Hauptablaufs.
     pub branch: Option<String>,
+    /// Einstiegspunkt des Prozesses (höchstens ein Schritt pro Prozess).
+    pub is_start: bool,
+    /// Der Prozess endet nach diesem Schritt.
+    pub is_end: bool,
 }
 
 impl ProcessStep {
@@ -35,6 +39,8 @@ impl ProcessStep {
             output: self.output.clone(),
             condition: self.condition.clone(),
             system: self.system.clone(),
+            is_start: self.is_start,
+            is_end: self.is_end,
         }
     }
 }
@@ -48,6 +54,8 @@ pub struct StepFields {
     pub output: String,
     pub condition: String,
     pub system: String,
+    pub is_start: bool,
+    pub is_end: bool,
 }
 
 /// Schritte einer Ebene in ihrer Reihenfolge: Hauptablauf (`parent = None`) oder ein Ja-/Nein-Zweig.

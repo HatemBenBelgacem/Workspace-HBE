@@ -19,6 +19,10 @@ const GW_HALF: f64 = 20.0;
 const SPLIT_COL: f64 = 140.0;
 /// Spalte der Zusammenführung.
 const JOIN_COL: f64 = 80.0;
+/// Zusätzlicher Platz nach einem Endpunkt für das Endereignis.
+const END_SPACE: f64 = 60.0;
+/// Abstand vom Ereignis-Mittelpunkt zur Kante der Aufgabe.
+const EVENT_GAP: f64 = 36.0;
 const NO_ROLE: &str = "Ohne Rolle";
 
 enum NodeKind {
@@ -60,9 +64,11 @@ impl Node {
 /// Ja- oder Nein-Strom einer Verzweigung.
 struct Branch {
     split: usize,
-    join: usize,
-    /// Erster und letzter Schritt; `None`, wenn der Zweig leer ist.
-    steps: Option<(usize, usize)>,
+    /// Fehlt, wenn beide Zweige mit einem Endpunkt enden.
+    join: Option<usize>,
+    /// Erster und letzter Schritt; `None`, wenn der Zweig leer ist. Der letzte fehlt, wenn der
+    /// Zweig mit einem Endpunkt endet.
+    steps: Option<(usize, Option<usize>)>,
     /// Ebene des Stroms (für leere Zweige die Linie in der Bahn der Verzweigung).
     level: i32,
     label: &'static str,
@@ -111,6 +117,10 @@ struct Layout<'a> {
     lanes: Vec<String>,
     /// Kleinste und grösste belegte Ebene je Bahn.
     lane_levels: Vec<(i32, i32)>,
+    /// Elemente, auf die ein Endereignis folgt.
+    ends: Vec<usize>,
+    /// Aufgabe des als Startpunkt markierten Schritts.
+    start: Option<usize>,
     x: f64,
 }
 
@@ -123,6 +133,8 @@ impl<'a> Layout<'a> {
             branches: Vec::new(),
             lanes: Vec::new(),
             lane_levels: Vec::new(),
+            ends: Vec::new(),
+            start: None,
             x: FIRST_X,
         }
     }
@@ -156,14 +168,24 @@ impl<'a> Layout<'a> {
         self.nodes.len() - 1
     }
 
+    /// Markiert ein Element als Endpunkt: Es erhält ein Endereignis und Platz dafür.
+    fn end_at(&mut self, node: usize) {
+        self.ends.push(node);
+        self.x += END_SPACE;
+    }
+
     /// Legt eine Folge von Schritten auf einer Ebene an; liefert erstes und letztes Element.
-    fn sequence(&mut self, group: Vec<ProcessStep>, level: i32) -> Option<(usize, usize)> {
-        let mut bounds: Option<(usize, usize)> = None;
+    /// Das letzte fehlt, wenn die Folge mit einem Endpunkt endet.
+    fn sequence(&mut self, group: Vec<ProcessStep>, level: i32) -> Option<(usize, Option<usize>)> {
+        let mut bounds: Option<(usize, Option<usize>)> = None;
         for step in group {
             let (entry, exit) = self.element(step, level);
             bounds = match bounds {
                 Some((first, previous)) => {
-                    self.sequence_edges.push((previous, entry));
+                    // Nach einem Endpunkt führt kein Pfeil zum nächsten Schritt.
+                    if let Some(previous) = previous {
+                        self.sequence_edges.push((previous, entry));
+                    }
                     Some((first, exit))
                 }
                 None => Some((entry, exit)),
@@ -172,11 +194,20 @@ impl<'a> Layout<'a> {
         bounds
     }
 
-    fn element(&mut self, step: ProcessStep, level: i32) -> (usize, usize) {
+    /// Liefert Eingang und Ausgang des Elements; der Ausgang fehlt bei einem Endpunkt.
+    fn element(&mut self, step: ProcessStep, level: i32) -> (usize, Option<usize>) {
         let lane = self.lane(&step);
+        let (is_start, is_end) = (step.is_start, step.is_end);
         if !has_branches(self.all, &step) {
             let task = self.push(NodeKind::Task(step), lane, level);
-            return (task, task);
+            if is_start {
+                self.start = Some(task);
+            }
+            if is_end {
+                self.end_at(task);
+                return (task, None);
+            }
+            return (task, Some(task));
         }
 
         let yes_steps = child_steps(self.all, Some(step.id), Some("Ja"));
@@ -188,6 +219,9 @@ impl<'a> Layout<'a> {
 
         let condition = step.condition.clone();
         let task = self.push(NodeKind::Task(step), lane, level);
+        if is_start {
+            self.start = Some(task);
+        }
         let split = self.push(NodeKind::Split(condition), lane, level);
         self.sequence_edges.push((task, split));
 
@@ -198,14 +232,27 @@ impl<'a> Layout<'a> {
         let no = self.sequence(no_steps, level + d);
         self.x = self.x.max(yes_end);
 
-        let join = self.push(NodeKind::Join, lane, level);
+        // Endet jeder Zweig mit einem Endpunkt, gibt es nichts zusammenzuführen.
+        let ends_in = |steps: Option<(usize, Option<usize>)>| matches!(steps, Some((_, None)));
+        let join = if ends_in(yes) && ends_in(no) {
+            None
+        } else {
+            Some(self.push(NodeKind::Join, lane, level))
+        };
         for (steps, branch_level, label) in [(yes, level - d, "Ja"), (no, level + d, "Nein")] {
             if steps.is_none() {
                 self.occupy(lane, branch_level);
             }
             self.branches.push(Branch { split, join, steps, level: branch_level, label });
         }
-        (task, join)
+        match join {
+            Some(join) if is_end => {
+                self.end_at(join);
+                (task, None)
+            }
+            Some(join) => (task, Some(join)),
+            None => (task, None),
+        }
     }
 }
 
@@ -222,7 +269,13 @@ pub fn ProcessModel(steps: Vec<ProcessStep>) -> impl IntoView {
         }
         .into_any();
     };
-    let Layout { nodes, sequence_edges, branches, lanes, lane_levels, x: end_x, .. } = layout;
+    // Ohne festgelegten Endpunkt endet der Hauptablauf nach seinem letzten Element.
+    if let Some(last) = last {
+        layout.ends.push(last);
+    }
+    // Ohne festgelegten Startpunkt beginnt der Prozess beim ersten Schritt.
+    let start = layout.start.unwrap_or(first);
+    let Layout { nodes, sequence_edges, branches, lanes, lane_levels, ends, x: end_x, .. } = layout;
 
     // Bahnhöhen: eine Grundhöhe plus eine Ebene je zusätzlichem Strom.
     let lane_heights: Vec<f64> = lane_levels
@@ -244,13 +297,36 @@ pub fn ProcessModel(steps: Vec<ProcessStep>) -> impl IntoView {
     let left = |node: &Node| (node.center_x() - node.half_w(), y(node));
     let right = |node: &Node| (node.center_x() + node.half_w(), y(node));
 
-    let width = end_x + 10.0 + EVENT_R + 30.0;
     let height: f64 = lane_heights.iter().sum();
 
-    let start_cx = LANE_LABEL_W + 36.0;
-    let (first_x, first_y) = left(&nodes[first]);
-    let (last_x, last_y) = right(&nodes[last]);
-    let end_cx = end_x + 10.0;
+    // Endereignisse rechts der Endpunkte.
+    let end_events: Vec<(f64, f64, f64)> = ends
+        .iter()
+        .map(|&node| {
+            let (x, y) = right(&nodes[node]);
+            (x, x + EVENT_GAP, y)
+        })
+        .collect();
+    let width = end_events
+        .iter()
+        .map(|&(_, cx, _)| cx + EVENT_R)
+        .fold(end_x, f64::max)
+        + 30.0;
+
+    // Startereignis: links des Startpunkts; hat dieser schon einen eingehenden Pfeil, darüber.
+    let has_incoming = sequence_edges.iter().any(|&(_, to)| to == start)
+        || branches.iter().any(|b| matches!(b.steps, Some((first, _)) if first == start));
+    let start_node = &nodes[start];
+    let (start_cx, start_cy, start_path) = if has_incoming {
+        let cx = start_node.x + 18.0;
+        let top = y(start_node) - BOX_H / 2.0;
+        let cy = top - 24.0;
+        (cx, cy, format!("M {cx} {} V {top}", cy + EVENT_R))
+    } else {
+        let (x, y) = left(start_node);
+        let cx = x - EVENT_GAP;
+        (cx, y, format!("M {} {y} H {x}", cx + EVENT_R))
+    };
 
     let lane_views = lanes
         .iter()
@@ -301,10 +377,9 @@ pub fn ProcessModel(steps: Vec<ProcessStep>) -> impl IntoView {
         .collect();
 
     for branch in &branches {
-        let (split, join) = (&nodes[branch.split], &nodes[branch.join]);
-        let join_x = join.center_x();
-        match branch.steps {
-            Some((first, last)) => {
+        let split = &nodes[branch.split];
+        match (branch.steps, branch.join) {
+            (Some((first, last)), join) => {
                 let (tx, ty) = left(&nodes[first]);
                 let (sx, sy) = vertex_toward(split, ty);
                 let out = if sy == ty {
@@ -314,16 +389,21 @@ pub fn ProcessModel(steps: Vec<ProcessStep>) -> impl IntoView {
                 };
                 paths.push((out, Some((split.center_x() + 6.0, ty - 6.0, branch.label))));
 
-                let (lx, ly) = right(&nodes[last]);
-                let (jx, jy) = vertex_toward(join, ly);
-                let back = if jy == ly {
-                    format!("M {lx} {ly} H {}", join_x - GW_HALF)
-                } else {
-                    format!("M {lx} {ly} H {jx} V {jy}")
-                };
-                paths.push((back, None));
+                // Ein Zweig mit Endpunkt führt nicht zurück zur Zusammenführung.
+                if let (Some(last), Some(join)) = (last, join) {
+                    let join = &nodes[join];
+                    let (lx, ly) = right(&nodes[last]);
+                    let (jx, jy) = vertex_toward(join, ly);
+                    let back = if jy == ly {
+                        format!("M {lx} {ly} H {}", join.center_x() - GW_HALF)
+                    } else {
+                        format!("M {lx} {ly} H {jx} V {jy}")
+                    };
+                    paths.push((back, None));
+                }
             }
-            None => {
+            (None, Some(join)) => {
+                let join = &nodes[join];
                 let ly = level_y(split.lane, branch.level);
                 let (sx, sy) = vertex_toward(split, ly);
                 let (jx, jy) = vertex_toward(join, ly);
@@ -332,6 +412,8 @@ pub fn ProcessModel(steps: Vec<ProcessStep>) -> impl IntoView {
                     Some((sx + 6.0, ly - 6.0, branch.label)),
                 ));
             }
+            // Ein leerer Zweig hat immer eine Zusammenführung.
+            (None, None) => {}
         }
     }
 
@@ -382,25 +464,31 @@ pub fn ProcessModel(steps: Vec<ProcessStep>) -> impl IntoView {
                 {lane_views}
 
                 // Startereignis
-                <circle cx=start_cx cy=first_y r=EVENT_R stroke-width="2" class="fill-base-100 stroke-success"/>
-                <path
-                    d=format!("M {} {first_y} H {first_x}", start_cx + EVENT_R)
-                    stroke-width="1.5"
-                    marker-end="url(#bpmn-arrow)"
-                    class="stroke-base-content"
-                />
+                <g>
+                    <title>"Start"</title>
+                    <circle cx=start_cx cy=start_cy r=EVENT_R stroke-width="2" class="fill-base-100 stroke-success"/>
+                </g>
+                <path d=start_path stroke-width="1.5" marker-end="url(#bpmn-arrow)" class="stroke-base-content"/>
 
                 {edge_views}
                 {node_views}
 
-                // Endereignis
-                <path
-                    d=format!("M {last_x} {last_y} H {}", end_cx - EVENT_R)
-                    stroke-width="1.5"
-                    marker-end="url(#bpmn-arrow)"
-                    class="stroke-base-content"
-                />
-                <circle cx=end_cx cy=last_y r=EVENT_R stroke-width="4" class="fill-base-100 stroke-error"/>
+                // Endereignisse
+                {end_events
+                    .into_iter()
+                    .map(|(x, cx, cy)| view! {
+                        <path
+                            d=format!("M {x} {cy} H {}", cx - EVENT_R)
+                            stroke-width="1.5"
+                            marker-end="url(#bpmn-arrow)"
+                            class="stroke-base-content"
+                        />
+                        <g>
+                            <title>"Ende"</title>
+                            <circle cx=cx cy=cy r=EVENT_R stroke-width="4" class="fill-base-100 stroke-error"/>
+                        </g>
+                    })
+                    .collect_view()}
             </svg>
         </div>
     }
