@@ -5,6 +5,9 @@ use leptos_router::{
     components::{Route, Router, Routes},
 };
 
+use crate::components::bpmn::components::{
+    diagram_editor::DiagramEditorPage, diagram_list::DiagramsPage,
+};
 use crate::components::entitaet::components::{
     entity_detail::EntityDetailPage, entity_list::EntitiesPage,
 };
@@ -23,6 +26,8 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <AutoReload options=options.clone()/>
                 <HydrationScripts options/>
                 <MetaTags/>
+                // Brücke zum BPMN-Editor; lädt die Bibliothek erst, wenn ein Diagramm geöffnet wird.
+                <script src="/bpmn-editor.js"></script>
             </head>
             <body>
                 <App/>
@@ -45,6 +50,8 @@ pub fn App() -> impl IntoView {
                     <Route path=StaticSegment("") view=HomePage/>
                     <Route path=StaticSegment("prozesse") view=ProcessesPage/>
                     <Route path=(StaticSegment("prozesse"), ParamSegment("id")) view=ProcessDetailPage/>
+                    <Route path=StaticSegment("bpmn") view=DiagramsPage/>
+                    <Route path=(StaticSegment("bpmn"), ParamSegment("id")) view=DiagramEditorPage/>
                     <Route path=StaticSegment("entitaeten") view=EntitiesPage/>
                     <Route path=(StaticSegment("entitaeten"), ParamSegment("id")) view=EntityDetailPage/>
                 </Routes>

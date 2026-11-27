@@ -56,7 +56,7 @@ Migrationen laufen beim Serverstart automatisch (`sqlx::migrate!()` in `src/main
 
 ## Architektur
 
-Der Code ist **pro Fachbereich** aufgeteilt. Aktuell gibt es die Bereiche `entität` und `prozess`.
+Der Code ist **pro Fachbereich** aufgeteilt. Aktuell gibt es die Bereiche `entität`, `prozess` und `bpmn`.
 Jeder Bereich hat diese Struktur:
 
 - `src/backend/<bereich>/model.rs` – Datenstrukturen (Serde, mit `sqlx::FromRow` nur bei `ssr`)
@@ -71,6 +71,10 @@ Weitere Dateien:
 - `src/backend/db.rs` – gemeinsame Hilfen für Server-Funktionen (`pool()`, `err()`, `required()`)
 - `src/components/layout.rs`, `home.rs` – Rahmen und Startseite
 - `src/components/modal.rs` – gemeinsames Modalfenster für alle Eingabemasken
+- `public/bpmn-editor.js` – Brücke zum grafischen BPMN-2.0-Editor [bpmn-js](https://bpmn.io) (Bereich `bpmn`).
+  Die Bibliothek wird beim Öffnen eines Diagramms von cdn.jsdelivr.net geladen; Rust ruft die Funktionen
+  unter `window.hbeBpmn` über `src/components/bpmn/components/editor_js.rs` auf. Diagramme werden als
+  BPMN-2.0-XML in `bpmn_diagrams.xml` gespeichert.
 - `migrations/` – SQL-Migrationen, fortlaufend nummeriert (`0006_….sql`)
 
 ## Konventionen
