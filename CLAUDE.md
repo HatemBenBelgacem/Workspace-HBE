@@ -71,9 +71,11 @@ Weitere Dateien:
 - `src/backend/db.rs` – gemeinsame Hilfen für Server-Funktionen (`pool()`, `err()`, `required()`)
 - `src/components/layout.rs`, `home.rs` – Rahmen und Startseite
 - `src/components/modal.rs` – gemeinsames Modalfenster für alle Eingabemasken
-- `public/bpmn-editor.js` – Brücke zum grafischen BPMN-2.0-Editor [bpmn-js](https://bpmn.io) (Bereich `bpmn`).
-  Die Bibliothek wird beim Öffnen eines Diagramms von cdn.jsdelivr.net geladen; Rust ruft die Funktionen
-  unter `window.hbeBpmn` über `src/components/bpmn/components/editor_js.rs` auf. Diagramme werden als
+- `public/bpmn-editor.js` – Brücke zum grafischen BPMN-2.0-Editor [bpmn-js](https://bpmn.io) mit
+  Token-Simulation (Bereich `bpmn`). Die Bibliothek liegt als eingechecktes Bundle in `public/vendor/bpmn/`
+  (gebaut in `tools/bpmn-bundle/`, siehe README dort) und wird beim Öffnen eines Diagramms geladen.
+  Rust ruft die Funktionen unter `window.hbeBpmn` über `src/components/bpmn/components/editor_js.rs` auf.
+  Deutsche Texte für Editor und Simulation stehen in `GERMAN` in `bpmn-editor.js`. Diagramme werden als
   BPMN-2.0-XML in `bpmn_diagrams.xml` gespeichert.
 - `migrations/` – SQL-Migrationen, fortlaufend nummeriert (`0006_….sql`)
 

@@ -9,7 +9,14 @@ mod browser {
     #[wasm_bindgen]
     extern "C" {
         #[wasm_bindgen(js_namespace = hbeBpmn, js_name = mount)]
-        pub fn mount(container: &JsValue, xml: &str, on_change: &JsValue, on_save: &JsValue, on_error: &JsValue);
+        pub fn mount(
+            container: &JsValue,
+            xml: &str,
+            on_change: &JsValue,
+            on_save: &JsValue,
+            on_error: &JsValue,
+            on_simulation: &JsValue,
+        );
         #[wasm_bindgen(js_namespace = hbeBpmn, js_name = destroy)]
         pub fn destroy();
         #[wasm_bindgen(js_namespace = hbeBpmn, js_name = markSaved)]
@@ -18,6 +25,8 @@ mod browser {
         pub fn undo();
         #[wasm_bindgen(js_namespace = hbeBpmn, js_name = redo)]
         pub fn redo();
+        #[wasm_bindgen(js_namespace = hbeBpmn, js_name = toggleSimulation)]
+        pub fn toggle_simulation();
         #[wasm_bindgen(js_namespace = hbeBpmn, js_name = zoom)]
         pub fn zoom(step: i32);
         #[wasm_bindgen(js_namespace = hbeBpmn, js_name = importFile)]
@@ -38,6 +47,7 @@ mod server {
     pub fn mark_saved() {}
     pub fn undo() {}
     pub fn redo() {}
+    pub fn toggle_simulation() {}
     pub fn zoom(_step: i32) {}
     pub fn import_file() {}
     pub fn export_xml(_name: &str) {}
